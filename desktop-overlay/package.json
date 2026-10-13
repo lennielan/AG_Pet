@@ -1,0 +1,18 @@
+{
+  "name": "desktop-overlay",
+  "version": "1.0.0",
+  "description": "AG Pet - Desktop Pet Overlay Electron Application",
+  "main": "dist/desktop-overlay/main/index.js",
+  "scripts": {
+    "build": "tsc && node -e \"const fs=require('fs'); fs.copyFileSync('renderer/index.html', 'dist/desktop-overlay/renderer/index.html'); fs.copyFileSync('renderer/style.css', 'dist/desktop-overlay/renderer/style.css');\"",
+    "typecheck": "tsc --noEmit",
+    "start": "electron ."
+  },
+  "dependencies": {
+    "electron": "^29.3.1"
+  },
+  "devDependencies": {
+    "@types/node": "^20.12.7",
+    "typescript": "^5.4.5"
+  }
+}

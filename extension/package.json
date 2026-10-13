@@ -1,0 +1,43 @@
+{
+  "name": "ag-pet-extension",
+  "displayName": "AG Pet Companion",
+  "description": "Floating pixel-art robot companion for Antigravity IDE",
+  "version": "1.0.0",
+  "publisher": "antigravity",
+  "engines": {
+    "vscode": "^1.80.0"
+  },
+  "categories": [
+    "Other"
+  ],
+  "activationEvents": [
+    "*",
+    "onStartupFinished"
+  ],
+  "main": "./dist/extension/src/extension.js",
+  "contributes": {
+    "commands": [
+      {
+        "command": "agPet.toggle",
+        "title": "AG Pet: Toggle Floating Companion"
+      },
+      {
+        "command": "agPet.restart",
+        "title": "AG Pet: Restart Companion"
+      },
+      {
+        "command": "agPet.focusIde",
+        "title": "AG Pet: Focus Antigravity IDE"
+      }
+    ]
+  },
+  "scripts": {
+    "build": "tsc",
+    "typecheck": "tsc --noEmit",
+    "watch": "tsc -w"
+  },
+  "devDependencies": {
+    "@types/node": "^20.12.7",
+    "typescript": "^5.4.5"
+  }
+}

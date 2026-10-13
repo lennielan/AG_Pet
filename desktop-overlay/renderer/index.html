@@ -1,0 +1,90 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>AG Pet Overlay</title>
+  <link rel="stylesheet" href="style.css">
+</head>
+<body>
+  <div id="pet-container" class="pet-container">
+    <!-- Pet Canvas Drag Region -->
+    <div id="drag-region" class="drag-region" title="Click to wave & focus Antigravity IDE • Drag to move">
+      <!-- Interactive Status Badge (Activity Tooltip) -->
+      <div id="status-badge" class="status-badge">
+        <span id="status-dot" class="status-dot"></span>
+        <span id="status-text" class="status-text">Idle</span>
+      </div>
+      <canvas id="pet-canvas" width="64" height="64"></canvas>
+    </div>
+
+    <!-- Modern Glassmorphism HUD Context Menu -->
+    <div id="context-menu" class="context-menu hidden">
+      <div class="hud-header">GRAVI HUD</div>
+
+      <!-- Segmented Scale Control -->
+      <div class="hud-section">
+        <div class="hud-section-label">SCALE</div>
+        <div class="segmented-control" id="scale-submenu">
+          <button type="button" class="segment-btn submenu-item active" data-scale="1.0" id="scale-opt-10">
+            <span class="check-mark" id="check-10">✔</span>1.0x
+          </button>
+          <button type="button" class="segment-btn submenu-item" data-scale="1.5" id="scale-opt-15">
+            <span class="check-mark" id="check-15"></span>1.5x
+          </button>
+          <button type="button" class="segment-btn submenu-item" data-scale="2.0" id="scale-opt-20">
+            <span class="check-mark" id="check-20"></span>2.0x
+          </button>
+        </div>
+      </div>
+
+      <!-- Test State 2x3 Grid Chips -->
+      <div class="hud-section">
+        <div class="hud-section-label">TEST STATE</div>
+        <div class="state-chips-grid" id="test-state-submenu">
+          <button type="button" class="state-chip submenu-item" data-state="idle" id="state-opt-idle">
+            <span class="state-dot dot-idle">●</span>Idle
+          </button>
+          <button type="button" class="state-chip submenu-item" data-state="running" id="state-opt-running">
+            <span class="state-dot dot-running">●</span>Running
+          </button>
+          <button type="button" class="state-chip submenu-item" data-state="ready" id="state-opt-ready">
+            <span class="state-dot dot-ready">●</span>Ready
+          </button>
+          <button type="button" class="state-chip submenu-item" data-state="needs_input" id="state-opt-needs-input">
+            <span class="state-dot dot-input">●</span>Input
+          </button>
+          <button type="button" class="state-chip submenu-item" data-state="blocked" id="state-opt-blocked">
+            <span class="state-dot dot-blocked">●</span>Blocked
+          </button>
+          <button type="button" class="state-chip submenu-item" data-state="sleeping" id="state-opt-sleep">
+            <span class="state-dot dot-sleep">●</span>Sleep
+          </button>
+        </div>
+      </div>
+
+      <div class="hud-divider"></div>
+
+      <!-- Action Buttons Row -->
+      <div class="hud-actions">
+        <button type="button" class="hud-action-btn" id="menu-mute">
+          <span class="hud-action-icon" id="mute-icon">🔊</span>
+          <span id="mute-label">Sound: ON</span>
+        </button>
+        <button type="button" class="hud-action-btn hud-action-danger" id="menu-hide">
+          <span class="hud-action-icon">✕</span>
+          <span>Hide Pet</span>
+        </button>
+      </div>
+    </div>
+  </div>
+
+  <script>
+    var exports = {};
+    if (typeof module === 'undefined') {
+      var module = { exports: exports };
+    }
+  </script>
+  <script src="app.js"></script>
+</body>
+</html>

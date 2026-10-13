@@ -1,0 +1,17 @@
+{
+  "name": "ag-pet",
+  "version": "1.0.0",
+  "description": "AG Pet - Antigravity IDE Floating Companion & Sprite Engine",
+  "main": "sprite-engine/index.ts",
+  "types": "sprite-engine/index.ts",
+  "scripts": {
+    "typecheck": "tsc --noEmit",
+    "build": "tsc && npm run build --prefix desktop-overlay && npm run build --prefix extension",
+    "test": "node tests/runner.js"
+  },
+  "devDependencies": {
+    "@types/node": "^20.12.7",
+    "electron": "^44.7.0",
+    "typescript": "^5.4.5"
+  }
+}

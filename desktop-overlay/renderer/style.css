@@ -1,0 +1,281 @@
+/**
+ * desktop-overlay/renderer/style.css
+ * Pixel-perfect styles for the transparent AG Pet overlay.
+ */
+
+* {
+  box-sizing: border-box;
+  user-select: none;
+  -webkit-user-select: none;
+  -webkit-user-drag: none;
+}
+
+html, body {
+  margin: 0;
+  padding: 0;
+  width: 100vw;
+  height: 100vh;
+  background: transparent !important;
+  overflow: hidden;
+  font-family: 'Consolas', 'Segoe UI', Tahoma, monospace;
+}
+
+/* Master Overlay Layout */
+.pet-container {
+  position: relative;
+  width: 100%;
+  height: 100%;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: flex-end;
+  padding-bottom: 4px;
+  pointer-events: none;
+}
+
+/* Drag Region & Canvas */
+.drag-region {
+  pointer-events: auto;
+  cursor: grab;
+  position: relative;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  margin-top: 0;
+}
+
+.drag-region.dragging {
+  cursor: grabbing;
+}
+
+/* Status Activity Tooltip Badge - Anchored directly over companion's head */
+.status-badge {
+  position: absolute;
+  bottom: calc(100% + 4px);
+  left: 50%;
+  transform: translateX(-50%) translateY(4px) scale(0.96);
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 3px 8px;
+  background: rgba(11, 25, 44, 0.94);
+  border: 1.5px solid #00FFFF;
+  border-radius: 6px;
+  box-shadow: 0 0 8px rgba(0, 255, 255, 0.35), 0 2px 6px rgba(0, 0, 0, 0.6);
+  opacity: 0;
+  pointer-events: none;
+  transition: opacity 0.15s ease, transform 0.15s ease;
+  z-index: 50;
+  max-width: 95%;
+  white-space: nowrap;
+}
+
+.status-badge.visible {
+  opacity: 1;
+  pointer-events: auto;
+  transform: translateX(-50%) translateY(0) scale(1);
+}
+
+.status-dot {
+  width: 8px;
+  height: 8px;
+  min-width: 8px;
+  border-radius: 50%;
+  background: #94A3B8;
+  box-shadow: 0 0 6px currentColor;
+  transition: background-color 0.2s ease, box-shadow 0.2s ease;
+}
+
+.status-text {
+  color: #E0F2FE;
+  font-size: 11px;
+  font-weight: 500;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  letter-spacing: 0.2px;
+}
+
+#pet-canvas {
+  display: block;
+  image-rendering: pixelated;
+  image-rendering: crisp-edges;
+}
+
+/* Modern Glassmorphism HUD Context Menu */
+.context-menu {
+  position: fixed;
+  z-index: 1000;
+  pointer-events: auto;
+  background: rgba(11, 25, 44, 0.94);
+  backdrop-filter: blur(14px);
+  -webkit-backdrop-filter: blur(14px);
+  border: 1.5px solid rgba(0, 240, 255, 0.45);
+  border-radius: 10px;
+  box-shadow: 0 10px 30px rgba(0, 0, 0, 0.75), 0 0 16px rgba(0, 240, 255, 0.25);
+  padding: 10px;
+  width: 200px;
+  box-sizing: border-box;
+  font-family: inherit;
+  color: #E0F2FE;
+  display: flex;
+  flex-direction: column;
+  gap: 7px;
+  max-height: calc(100vh - 16px);
+  overflow: hidden;
+}
+
+.context-menu.hidden {
+  display: none !important;
+}
+
+.hud-header {
+  font-size: 10px;
+  font-weight: 700;
+  color: #00F0FF;
+  letter-spacing: 1.2px;
+  text-align: center;
+  text-transform: uppercase;
+  margin-bottom: 2px;
+}
+
+.hud-section {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.hud-section-label {
+  font-size: 9px;
+  font-weight: 600;
+  color: #64748B;
+  letter-spacing: 0.8px;
+  text-transform: uppercase;
+}
+
+.segmented-control {
+  display: flex;
+  gap: 4px;
+  background: rgba(15, 23, 42, 0.8);
+  border: 1px solid rgba(56, 189, 248, 0.25);
+  border-radius: 6px;
+  padding: 2px;
+}
+
+.segment-btn {
+  flex: 1;
+  padding: 4px 2px;
+  border: none;
+  background: transparent;
+  color: #94A3B8;
+  font-family: inherit;
+  font-size: 11px;
+  font-weight: 600;
+  border-radius: 4px;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 2px;
+  transition: all 0.15s ease;
+}
+
+.segment-btn:hover {
+  color: #00F0FF;
+  background: rgba(0, 240, 255, 0.12);
+}
+
+.segment-btn.active {
+  background: #0284C7;
+  color: #FFFFFF;
+  box-shadow: 0 0 8px rgba(2, 132, 199, 0.5);
+}
+
+.state-chips-grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 4px;
+}
+
+.state-chip {
+  padding: 4px 6px;
+  border: 1px solid rgba(56, 189, 248, 0.2);
+  background: rgba(15, 23, 42, 0.6);
+  border-radius: 6px;
+  color: #BAE6FD;
+  font-family: inherit;
+  font-size: 10px;
+  font-weight: 500;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  transition: all 0.15s ease;
+}
+
+.state-chip:hover {
+  background: rgba(30, 58, 138, 0.6);
+  border-color: #00F0FF;
+  color: #FFFFFF;
+  transform: translateY(-1px);
+}
+
+.state-dot {
+  display: inline-block;
+  font-size: 8px;
+}
+
+.dot-idle { color: #94A3B8; }
+.dot-running { color: #00FFFF; }
+.dot-ready { color: #4ADE80; }
+.dot-input { color: #FBBF24; }
+.dot-blocked { color: #F87171; }
+.dot-sleep { color: #818CF8; }
+
+.hud-divider {
+  height: 1px;
+  background: rgba(56, 189, 248, 0.2);
+  margin: 1px 0;
+}
+
+.hud-actions {
+  display: flex;
+  gap: 6px;
+}
+
+.hud-action-btn {
+  flex: 1;
+  padding: 5px 6px;
+  border: 1px solid rgba(56, 189, 248, 0.3);
+  background: rgba(15, 23, 42, 0.8);
+  border-radius: 6px;
+  color: #BAE6FD;
+  font-family: inherit;
+  font-size: 10px;
+  font-weight: 600;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 4px;
+  transition: all 0.15s ease;
+}
+
+.hud-action-btn:hover {
+  background: rgba(0, 240, 255, 0.15);
+  border-color: #00F0FF;
+  color: #00F0FF;
+}
+
+.hud-action-danger:hover {
+  background: rgba(239, 68, 68, 0.2);
+  border-color: #EF4444;
+  color: #FCA5A5;
+}
+
+.check-mark {
+  display: inline-block;
+  font-size: 9px;
+  color: #00F0FF;
+  margin-right: 1px;
+}
