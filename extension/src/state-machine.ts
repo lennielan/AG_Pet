@@ -94,7 +94,7 @@ export function parseTranscriptLine(line: string | null | undefined): ParseResul
   }
 
   // 3. Ready / Turn complete state
-  if (obj.turn_complete || (obj.type === 'PLANNER_RESPONSE' && obj.content && (!obj.tool_calls || obj.tool_calls.length === 0))) {
+  if (obj.turn_complete || (obj.type === 'PLANNER_RESPONSE' && (!obj.tool_calls || obj.tool_calls.length === 0) && (typeof obj.content === 'string' || obj.status === 'DONE'))) {
     const summary = obj.summary || 'Task completed successfully';
     return {
       state: 'ready',
@@ -111,55 +111,55 @@ export function parseTranscriptLine(line: string | null | undefined): ParseResul
   if (obj.tool_calls && Array.isArray(obj.tool_calls) && obj.tool_calls.length > 0) {
     const firstCall = obj.tool_calls[0];
     const toolName = firstCall?.function?.name || firstCall?.name || firstCall?.tool || 'tool';
-    const summary = obj.summary || `Running tool: ${toolName}`;
+    const actionDesc = firstCall?.args?.toolAction || firstCall?.args?.toolSummary || firstCall?.toolAction || firstCall?.toolSummary;
+    const summary = obj.summary || (actionDesc ? `Running: ${actionDesc}` : `Running tool: ${toolName}`);
     return {
       state: 'running',
       summary,
       timestamp,
       metadata: {
         toolName,
-        step: typeof obj.step === 'number' ? obj.step : undefined,
+        step: typeof obj.step === 'number' ? obj.step : (typeof obj.step_index === 'number' ? obj.step_index : undefined),
       },
     };
   }
 
-  // 5. User prompt message (running state)
-  if (obj.type === 'USER_INPUT' || obj.role === 'user') {
-    const summary = obj.summary || 'Processing request...';
+  // 5. Thinking / reasoning / user prompt (thinking state)
+  const hasThoughtPart = Array.isArray(obj.parts) && obj.parts.some((p: any) => p && p.thought);
+  const isThinking =
+    Boolean(obj.thinking) ||
+    Boolean(obj.thought) ||
+    obj.type === 'THOUGHT' ||
+    hasThoughtPart ||
+    (obj.type === 'PLANNER_RESPONSE' && !obj.turn_complete && (!obj.tool_calls || obj.tool_calls.length === 0)) ||
+    obj.type === 'USER_INPUT' ||
+    obj.role === 'user';
+
+  if (isThinking) {
+    const summary = typeof obj.thinking === 'object' && obj.thinking?.text
+      ? 'Thinking...'
+      : (typeof obj.summary === 'string' ? obj.summary : 'Thinking...');
     return {
-      state: 'running',
+      state: 'thinking',
       summary,
       timestamp,
       metadata: {
-        role: 'user',
+        thinking: true,
+        role: obj.role,
         type: obj.type,
       },
     };
   }
 
-  // 6. Thinking / reasoning (running state)
-  if (obj.thinking || (obj.type === 'PLANNER_RESPONSE' && !obj.turn_complete)) {
-    const summary = typeof obj.thinking === 'object' && obj.thinking?.text
-      ? 'Thinking...'
-      : (typeof obj.summary === 'string' ? obj.summary : 'Thinking...');
+  // 6. Model in-progress response streaming / tool execution
+  if ((obj.role === 'model' && (obj.content || obj.parts)) || (obj.type === 'GENERIC' && obj.status === 'DONE')) {
     return {
       state: 'running',
-      summary,
+      summary: obj.summary || 'Executing task...',
       timestamp,
       metadata: {
-        thinking: true,
-      },
-    };
-  }
-
-  // 7. Model in-progress response streaming
-  if (obj.role === 'model' && (obj.content || obj.parts)) {
-    return {
-      state: 'running',
-      summary: obj.summary || 'Generating response...',
-      timestamp,
-      metadata: {
-        role: 'model',
+        role: obj.role || 'model',
+        type: obj.type,
       },
     };
   }
@@ -178,6 +178,9 @@ export class AgentStateMachine extends EventEmitter {
   private history: StatePayload[] = [];
   private readonly maxHistorySize: number;
   private readyAutoReturnTimer: NodeJS.Timeout | null = null;
+  private readyDebounceTimer: NodeJS.Timeout | null = null;
+  private thinkingTransitionTimer: NodeJS.Timeout | null = null;
+  private hasCelebratedTurn: boolean = false;
 
   constructor(options: StateMachineOptions = {}) {
     super();
@@ -212,6 +215,28 @@ export class AgentStateMachine extends EventEmitter {
       return null;
     }
 
+    // Debounce ready if arriving while actively running or thinking to prevent hop-spam during multi-step tasks
+    if (payload.state === 'ready' && (this.currentState === 'running' || this.currentState === 'thinking')) {
+      if (this.readyDebounceTimer) {
+        clearTimeout(this.readyDebounceTimer);
+      }
+      this.readyDebounceTimer = setTimeout(() => {
+        this.readyDebounceTimer = null;
+        if (this.currentState === 'running' || this.currentState === 'thinking') {
+          this.transitionTo(payload.state, payload.summary, payload.metadata);
+        }
+      }, 3000);
+      if (typeof this.readyDebounceTimer.unref === 'function') {
+        this.readyDebounceTimer.unref();
+      }
+      return this.currentPayload;
+    }
+
+    if (this.readyDebounceTimer) {
+      clearTimeout(this.readyDebounceTimer);
+      this.readyDebounceTimer = null;
+    }
+
     this.transitionTo(payload.state, payload.summary, payload.metadata);
     return this.currentPayload;
   }
@@ -233,6 +258,41 @@ export class AgentStateMachine extends EventEmitter {
       this.readyAutoReturnTimer = null;
     }
 
+    if (this.thinkingTransitionTimer) {
+      clearTimeout(this.thinkingTransitionTimer);
+      this.thinkingTransitionTimer = null;
+    }
+
+    if (nextState === 'running') {
+      this.hasCelebratedTurn = false;
+      if (this.readyDebounceTimer) {
+        clearTimeout(this.readyDebounceTimer);
+        this.readyDebounceTimer = null;
+      }
+
+      // Automatically transition from running to thinking after 1.8s of no new tool calls
+      this.thinkingTransitionTimer = setTimeout(() => {
+        this.thinkingTransitionTimer = null;
+        if (this.currentState === 'running') {
+          this.transitionTo('thinking', 'Thinking...');
+        }
+      }, 1800);
+      if (typeof this.thinkingTransitionTimer.unref === 'function') {
+        this.thinkingTransitionTimer.unref();
+      }
+    }
+
+    if (nextState === 'thinking') {
+      this.hasCelebratedTurn = false;
+    }
+
+    if (nextState === 'ready') {
+      if (this.hasCelebratedTurn) {
+        return this.currentPayload;
+      }
+      this.hasCelebratedTurn = true;
+    }
+
     const prevPayload = this.currentPayload;
     this.currentState = nextState;
     this.currentPayload = {
@@ -247,13 +307,13 @@ export class AgentStateMachine extends EventEmitter {
       this.history.shift();
     }
 
-    // Auto-return from ready celebration to idle after 3 seconds
+    // Auto-return from ready celebration to idle after 1.8 seconds
     if (nextState === 'ready') {
       this.readyAutoReturnTimer = setTimeout(() => {
         if (this.currentState === 'ready') {
           this.transitionTo('idle', 'Idle');
         }
-      }, 3000);
+      }, 1800);
       if (typeof this.readyAutoReturnTimer.unref === 'function') {
         this.readyAutoReturnTimer.unref();
       }
@@ -284,6 +344,15 @@ export class AgentStateMachine extends EventEmitter {
       clearTimeout(this.readyAutoReturnTimer);
       this.readyAutoReturnTimer = null;
     }
+    if (this.readyDebounceTimer) {
+      clearTimeout(this.readyDebounceTimer);
+      this.readyDebounceTimer = null;
+    }
+    if (this.thinkingTransitionTimer) {
+      clearTimeout(this.thinkingTransitionTimer);
+      this.thinkingTransitionTimer = null;
+    }
+    this.hasCelebratedTurn = false;
     this.currentState = initialState;
     this.currentPayload = {
       state: initialState,

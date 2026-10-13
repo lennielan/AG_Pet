@@ -87,10 +87,6 @@ export class DragController {
     };
     this.lastMovePos = { screenX, screenY, time: performance.now() };
     this.velocity = { vx: 0, vy: 0 };
-
-    if (this.callbacks.onDragStart) {
-      this.callbacks.onDragStart();
-    }
   }
 
   /**
@@ -106,7 +102,12 @@ export class DragController {
     const distance = Math.hypot(deltaX, deltaY);
 
     if (distance > 5) {
-      this.hasExceededDragThreshold = true;
+      if (!this.hasExceededDragThreshold) {
+        this.hasExceededDragThreshold = true;
+        if (this.callbacks.onDragStart) {
+          this.callbacks.onDragStart();
+        }
+      }
     }
 
     // Calculate instantaneous velocity for directional lean animation

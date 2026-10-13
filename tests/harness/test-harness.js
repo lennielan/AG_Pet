@@ -89,7 +89,7 @@ class TestHarness {
       getHistory: () => [...history],
       getScreenExpression: () => contracts.SCREEN_EXPRESSIONS[currentState] || '^ ^',
       transitionTo: (newState, summary = '') => {
-        if (!contracts.VALID_AGENT_STATES.includes(newState)) {
+        if (!contracts.VALID_AGENT_STATES.includes(newState) && !['sleeping', 'thinking'].includes(newState)) {
           throw new Error(`Invalid state transition to: ${newState}`);
         }
         currentState = newState;
@@ -229,7 +229,7 @@ class TestHarness {
 
     if (obj.thinking) {
       return {
-        state: 'running',
+        state: 'thinking',
         summary: 'Thinking...',
         timestamp: Date.now()
       };

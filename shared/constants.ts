@@ -14,6 +14,7 @@ export const ALL_AGENT_STATES: readonly AgentState[] = [
   'dragging',
   'waving',
   'sleeping',
+  'thinking',
 ] as const;
 
 export const SUPPORTED_SCALES: readonly PetScale[] = [1.0, 1.5, 2.0] as const;
@@ -66,6 +67,7 @@ export const SCREEN_EXPRESSIONS: Record<AgentState, string> = {
   dragging: '> <',
   waving: '^ ~',
   sleeping: '- -',
+  thinking: '• • •',
 };
 
 /**

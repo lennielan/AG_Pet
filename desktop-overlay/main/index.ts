@@ -407,8 +407,18 @@ export class OverlayApplication {
       }
     });
 
-    // Re-assert topmost whenever focus is lost or shifted to Antigravity
-    this.mainWindow.on('blur', this.enforceTopmost);
+    // Re-assert topmost and close context menu whenever focus is lost
+    this.mainWindow.on('blur', () => {
+      this.enforceTopmost();
+      if (this.mainWindow && !this.mainWindow.isDestroyed()) {
+        try {
+          this.mainWindow.webContents.send('close_context_menu');
+          if (typeof this.mainWindow.setIgnoreMouseEvents === 'function') {
+            this.mainWindow.setIgnoreMouseEvents(true, { forward: true });
+          }
+        } catch (_e) {}
+      }
+    });
 
     // Heartbeat every 2.5 seconds to ensure DWM focus shifts never bury the pet
     const topmostInterval = setInterval(this.enforceTopmost, 2500);
@@ -547,7 +557,19 @@ export class OverlayApplication {
     ipcMain.on('ag-pet:set-ignore-mouse', (_event: any, ignore: boolean) => {
       if (this.mainWindow && !this.mainWindow.isDestroyed() && typeof this.mainWindow.setIgnoreMouseEvents === 'function') {
         try {
-          this.mainWindow.setIgnoreMouseEvents(Boolean(ignore), { forward: true });
+          if (ignore) {
+            this.mainWindow.setIgnoreMouseEvents(true, { forward: true });
+          } else {
+            this.mainWindow.setIgnoreMouseEvents(false);
+          }
+        } catch (_e) {}
+      }
+    });
+
+    ipcMain.on('ag-pet:focus-window', () => {
+      if (this.mainWindow && !this.mainWindow.isDestroyed()) {
+        try {
+          this.mainWindow.focus();
         } catch (_e) {}
       }
     });

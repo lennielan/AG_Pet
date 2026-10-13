@@ -6,6 +6,12 @@
 import { AgentState, PetConfig, PetScale } from '../../shared/types';
 import { DEFAULT_CONFIG } from '../../shared/constants';
 
+let electronModule: any = null;
+try {
+  electronModule = require('electron');
+} catch (_e) {}
+const ipcRenderer = electronModule?.ipcRenderer;
+
 export interface ContextMenuItem {
   id: string;
   label: string;
@@ -24,12 +30,14 @@ export interface ContextMenuCallbacks {
   onHide?: () => void;
   onPersist?: (config: PetConfig) => void;
   onTestState?: (state: AgentState) => void;
+  onClose?: () => void;
 }
 
 export class ContextMenuController {
   private config: PetConfig;
   private isPetHidden = false;
   private isMenuOpen = false;
+  private currentState: AgentState = 'idle';
   private menuElement: HTMLElement | null = null;
   private callbacks: ContextMenuCallbacks;
 
@@ -99,9 +107,16 @@ export class ContextMenuController {
   }
 
   public testState(state: AgentState): void {
+    this.currentState = state;
+    this.renderDom();
     if (this.callbacks.onTestState) {
       this.callbacks.onTestState(state);
     }
+  }
+
+  public setActiveState(state: AgentState): void {
+    this.currentState = state;
+    this.renderDom();
   }
 
   public updateConfig(updates: Partial<PetConfig>): void {
@@ -143,6 +158,11 @@ export class ContextMenuController {
             label: 'Idle',
             checked: false,
             action: () => this.testState('idle'),
+          },
+          {
+            label: 'Thinking',
+            checked: false,
+            action: () => this.testState('thinking'),
           },
           {
             label: 'Running',
@@ -199,6 +219,11 @@ export class ContextMenuController {
     }
 
     this.isMenuOpen = true;
+    if (ipcRenderer) {
+      try {
+        ipcRenderer.send('ag-pet:focus-window');
+      } catch (_e) {}
+    }
     if (this.menuElement) {
       this.renderDom();
       this.menuElement.classList.remove('hidden');
@@ -207,13 +232,19 @@ export class ContextMenuController {
       this.menuElement.style.left = '0px';
       this.menuElement.style.top = '0px';
 
-      // Clamping to viewport bounds with 8px margin
+      // Clamping to viewport bounds with 8px margin, offset from pet's face
       const rect = this.menuElement.getBoundingClientRect();
       const padding = 8;
-      const maxX = Math.max(padding, window.innerWidth - rect.width - padding);
-      const maxY = Math.max(padding, window.innerHeight - rect.height - padding);
-      const posX = Math.max(padding, Math.min(clientX, maxX));
-      const posY = Math.max(padding, Math.min(clientY, maxY));
+      let targetX = clientX + 16;
+      let targetY = clientY - 10;
+      if (targetX + rect.width > window.innerWidth - padding) {
+        targetX = Math.max(padding, clientX - rect.width - 16);
+      }
+      if (targetY + rect.height > window.innerHeight - padding) {
+        targetY = Math.max(padding, window.innerHeight - rect.height - padding);
+      }
+      const posX = Math.max(padding, Math.min(targetX, window.innerWidth - rect.width - padding));
+      const posY = Math.max(padding, Math.min(targetY, window.innerHeight - rect.height - padding));
 
       this.menuElement.style.left = `${posX}px`;
       this.menuElement.style.top = `${posY}px`;
@@ -221,12 +252,16 @@ export class ContextMenuController {
   }
 
   public hide(): void {
+    if (!this.isMenuOpen) return;
     this.isMenuOpen = false;
     if (this.menuElement) {
       this.menuElement.classList.add('hidden');
       this.menuElement.querySelectorAll('.menu-parent').forEach((el) => {
         el.classList.remove('open');
       });
+    }
+    if (this.callbacks.onClose) {
+      this.callbacks.onClose();
     }
   }
 
@@ -246,7 +281,7 @@ export class ContextMenuController {
       });
     });
 
-    // Test state options click
+    // Test state options click (keeps menu open so user can cycle states!)
     const testStateOpts = this.menuElement.querySelectorAll('#test-state-submenu .submenu-item');
     testStateOpts.forEach((el) => {
       el.addEventListener('click', (e) => {
@@ -255,7 +290,6 @@ export class ContextMenuController {
         if (stateVal) {
           this.testState(stateVal as AgentState);
         }
-        this.hide();
       });
     });
 
@@ -278,16 +312,30 @@ export class ContextMenuController {
       });
     }
 
-    // Dismiss menu on click outside or Escape
-    window.addEventListener('click', () => {
-      if (this.isMenuOpen) this.hide();
-    });
+    // Dismiss menu on blur, pointerdown outside, click, or Escape
+    if (typeof window !== 'undefined') {
+      window.addEventListener('blur', () => {
+        if (this.isMenuOpen) this.hide();
+      });
 
-    window.addEventListener('keydown', (e) => {
-      if (e.key === 'Escape' && this.isMenuOpen) {
-        this.hide();
-      }
-    });
+      window.addEventListener('pointerdown', (e: MouseEvent) => {
+        if (this.isMenuOpen && this.menuElement && !this.menuElement.contains(e.target as Node)) {
+          this.hide();
+        }
+      });
+
+      window.addEventListener('click', (e: MouseEvent) => {
+        if (this.isMenuOpen && this.menuElement && !this.menuElement.contains(e.target as Node)) {
+          this.hide();
+        }
+      });
+
+      window.addEventListener('keydown', (e) => {
+        if (e.key === 'Escape' && this.isMenuOpen) {
+          this.hide();
+        }
+      });
+    }
   }
 
   private renderDom(): void {
@@ -309,6 +357,13 @@ export class ContextMenuController {
     btn10?.classList.toggle('active', this.config.scale === 1.0);
     btn15?.classList.toggle('active', this.config.scale === 1.5);
     btn20?.classList.toggle('active', this.config.scale === 2.0);
+
+    // Update active highlight for test state chips
+    const stateChips = this.menuElement.querySelectorAll('#test-state-submenu .submenu-item');
+    stateChips.forEach((chip) => {
+      const s = chip.getAttribute('data-state');
+      chip.classList.toggle('active', s === this.currentState);
+    });
 
     // Update mute label & icon
     const muteLabel = this.menuElement.querySelector('#mute-label');

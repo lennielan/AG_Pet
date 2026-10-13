@@ -57,7 +57,8 @@ const SCREEN_EXPRESSIONS = {
   ready: '★ ★',
   blocked: 'X X',
   dragging: '> <',
-  waving: '^ ~'
+  waving: '^ ~',
+  thinking: '• • •'
 };
 
 const WINDOW_SPEC = {
@@ -112,7 +113,7 @@ function validateStatePayload(payload) {
   if (typeof payload !== 'object' || payload === null) {
     return { valid: false, error: 'Payload must be a non-null object' };
   }
-  if (!VALID_AGENT_STATES.includes(payload.state)) {
+  if (!VALID_AGENT_STATES.includes(payload.state) && !['sleeping', 'thinking'].includes(payload.state)) {
     return { valid: false, error: `Invalid state: ${payload.state}` };
   }
   if (typeof payload.summary !== 'string' || payload.summary.length === 0) {

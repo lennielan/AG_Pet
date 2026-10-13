@@ -28,8 +28,7 @@ html, body {
   display: flex;
   flex-direction: column;
   align-items: center;
-  justify-content: flex-end;
-  padding-bottom: 4px;
+  justify-content: center;
   pointer-events: none;
 }
 
@@ -48,20 +47,20 @@ html, body {
   cursor: grabbing;
 }
 
-/* Status Activity Tooltip Badge - Anchored directly over companion's head */
+/* Tactile Pixel-Art Speech Bubble - Anchored directly over companion's head */
 .status-badge {
   position: absolute;
-  bottom: calc(100% + 4px);
+  bottom: calc(100% + 8px);
   left: 50%;
   transform: translateX(-50%) translateY(4px) scale(0.96);
   display: flex;
   align-items: center;
   gap: 6px;
-  padding: 3px 8px;
-  background: rgba(11, 25, 44, 0.94);
-  border: 1.5px solid #00FFFF;
-  border-radius: 6px;
-  box-shadow: 0 0 8px rgba(0, 255, 255, 0.35), 0 2px 6px rgba(0, 0, 0, 0.6);
+  padding: 4px 8px;
+  background: #181C32;
+  border: 2px solid #3B4268;
+  border-radius: 2px;
+  box-shadow: 0 2px 0 #0A0D1A, 2px 2px 0 #0A0D1A, -2px 2px 0 #0A0D1A;
   opacity: 0;
   pointer-events: none;
   transition: opacity 0.15s ease, transform 0.15s ease;
@@ -72,24 +71,73 @@ html, body {
 
 .status-badge.visible {
   opacity: 1;
-  pointer-events: auto;
+  pointer-events: none;
   transform: translateX(-50%) translateY(0) scale(1);
 }
 
+/* Speech Bubble Pointer (Tail) pointing down to Gravi's head */
+.status-badge::before {
+  content: '';
+  position: absolute;
+  bottom: -6px;
+  left: 50%;
+  transform: translateX(-50%);
+  width: 0;
+  height: 0;
+  border-left: 5px solid transparent;
+  border-right: 5px solid transparent;
+  border-top: 6px solid #3B4268;
+  z-index: 1;
+}
+
+.status-badge::after {
+  content: '';
+  position: absolute;
+  bottom: -4px;
+  left: 50%;
+  transform: translateX(-50%);
+  width: 0;
+  height: 0;
+  border-left: 4px solid transparent;
+  border-right: 4px solid transparent;
+  border-top: 5px solid #181C32;
+  z-index: 2;
+}
+
+/* Pixel-art square status indicator */
 .status-dot {
-  width: 8px;
-  height: 8px;
-  min-width: 8px;
-  border-radius: 50%;
-  background: #94A3B8;
-  box-shadow: 0 0 6px currentColor;
-  transition: background-color 0.2s ease, box-shadow 0.2s ease;
+  width: 6px;
+  height: 6px;
+  min-width: 6px;
+  border-radius: 0;
+  border: 1px solid rgba(0, 0, 0, 0.45);
+  background: #64748B;
+  box-shadow: none;
+  transition: background-color 0.15s steps(2);
+}
+
+@keyframes stepBlink {
+  0%, 100% {
+    opacity: 1;
+  }
+  50% {
+    opacity: 0.35;
+  }
+}
+
+.status-dot.thinking {
+  animation: stepBlink 1.0s infinite steps(2);
+}
+
+.status-dot.pulsing {
+  animation: stepBlink 1.4s infinite steps(2);
 }
 
 .status-text {
-  color: #E0F2FE;
+  color: #E2E8F0;
+  font-family: 'Consolas', 'Courier New', monospace;
   font-size: 11px;
-  font-weight: 500;
+  font-weight: 600;
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
@@ -220,12 +268,26 @@ html, body {
   transform: translateY(-1px);
 }
 
+.state-chip.active {
+  background: rgba(0, 240, 255, 0.25);
+  border-color: #00F0FF;
+  color: #FFFFFF;
+  font-weight: 700;
+  box-shadow: 0 0 6px rgba(0, 240, 255, 0.4);
+}
+
+.state-chip[data-state="sleeping"] {
+  grid-column: span 2;
+  justify-content: center;
+}
+
 .state-dot {
   display: inline-block;
   font-size: 8px;
 }
 
 .dot-idle { color: #94A3B8; }
+.dot-thinking { color: #A78BFA; }
 .dot-running { color: #00FFFF; }
 .dot-ready { color: #4ADE80; }
 .dot-input { color: #FBBF24; }

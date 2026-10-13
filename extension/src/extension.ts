@@ -64,10 +64,26 @@ export class AntigravityExtension {
       const payload = this.stateMachine.processLine(line);
       if (payload) {
         this.bridge.broadcast(payload);
+        if (payload.state === 'needs_input' || payload.state === 'blocked' || payload.state === 'ready') {
+          this.watcher.cancelInactivityTimer();
+        } else if (payload.state === 'running') {
+          this.watcher.recordActivity(payload.summary);
+        }
+      } else {
+        // Line didn't have an explicit recognized state key -> trigger activity debouncing
+        this.watcher.recordActivity();
       }
     });
 
-    // 2. Direct State changes -> WebSocket Bridge
+    // 2. File/Session Activity events -> State Machine
+    this.watcher.on('activity', (payload: StatePayload) => {
+      const current = this.stateMachine.getCurrentState();
+      if (current !== 'blocked' && current !== 'needs_input') {
+        this.stateMachine.transitionTo(payload.state, payload.summary, payload.metadata);
+      }
+    });
+
+    // 3. Direct State changes -> WebSocket Bridge
     this.stateMachine.on('state_change', (payload: StatePayload) => {
       this.bridge.broadcast(payload);
     });

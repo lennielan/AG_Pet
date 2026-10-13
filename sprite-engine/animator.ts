@@ -48,6 +48,7 @@ export class PetAnimator {
   private smoothedVelocity = { x: 0, y: 0 };
   private particles: Particle[] = [];
   private particleSpawnTimer = 0;
+  private sleepParticleToggle = false;
   private history: AgentState[] = ['idle'];
   private currentPose: AnimationPose;
 
@@ -200,6 +201,9 @@ export class PetAnimator {
       case 'sleeping':
         targetRig = this.computeSleepingTarget(clampedDt);
         break;
+      case 'thinking':
+        targetRig = this.computeThinkingTarget(clampedDt);
+        break;
       case 'dragging':
         targetRig = this.computeDraggingTarget(clampedDt);
         break;
@@ -285,23 +289,23 @@ export class PetAnimator {
 
     // Torso breathing & floating
     const torsoDy = Math.sin(omega * t) * 2.5;
-    const torsoRot = Math.sin(0.5 * omega * t) * 0.02;
+    const torsoRot = 0;
     const torsoScaleY = 1.0 + 0.02 * Math.cos(omega * t);
     const torsoScaleX = 1.0 - 0.01 * Math.cos(omega * t);
 
     // Head trailing torso with phase lag (-0.35 rad)
     const headDy = Math.sin(omega * t - 0.35) * 2.5;
-    const headRot = Math.sin(0.5 * omega * t - 0.35) * 0.03;
+    const headRot = 0;
 
     // Hands trailing with deeper phase lag (-0.75 rad)
     const handWave = Math.sin(omega * t - 0.75) * 2.8;
     const leftHandDx = -0.5 * Math.cos(1.2 * t);
     const leftHandDy = handWave;
-    const leftHandRot = Math.sin(1.5 * t) * 0.04;
+    const leftHandRot = 0;
 
     const rightHandDx = 0.5 * Math.cos(1.2 * t);
     const rightHandDy = handWave;
-    const rightHandRot = -Math.sin(1.5 * t) * 0.04;
+    const rightHandRot = 0;
 
     // Micro-behaviors
     let eyeScaleY = 1.0;
@@ -339,22 +343,33 @@ export class PetAnimator {
   private computeRunningTarget(dt: number): RigPose {
     const t = this.totalTime;
 
-    // Fast computational hover
-    const torsoDy = Math.sin(4.0 * t) * 1.5;
-    const torsoRot = Math.sin(4.0 * t) * 0.02;
+    // Computational hover
+    const torsoDy = Math.sin(3.5 * t) * 1.2;
+    const torsoRot = 0;
 
-    // Focused forward head lean
-    const headDy = 1.0 + Math.sin(4.0 * t) * 0.5;
-    const headRot = 0.05;
+    // Head tilted forward towards keyboard, scanning code
+    const headDy = torsoDy + 0.8;
+    const headDx = Math.sin(2.8 * t) * 0.8;
+    const headRot = 0;
 
-    // Rapid alternating typing hands (18 rad/s anti-phase)
-    const leftHandDy = Math.sin(18.0 * t) * 3.0;
-    const leftHandRot = Math.sin(18.0 * t) * 0.15;
-    const rightHandDy = Math.sin(18.0 * t + Math.PI) * 3.0;
-    const rightHandRot = -Math.sin(18.0 * t) * 0.15;
+    // Hands swept inwards towards keyboard center with horizontal typing sweep
+    const leftSweep = Math.sin(5.5 * t) * 1.8 + Math.cos(3.2 * t) * 0.8;
+    const leftHandDx = 4.8 + leftSweep;
 
-    // Code-reading darting glance (left to right)
-    const lookX = Math.sin(6.0 * t) * 2.5;
+    const rightSweep = Math.cos(6.0 * t) * 1.8 + Math.sin(3.7 * t) * 0.8;
+    const rightHandDx = -4.8 + rightSweep;
+
+    // Fast typing taps
+    const leftTap = Math.abs(Math.sin(16.0 * t)) * 2.8 - 2.2;
+    const rightTap = Math.abs(Math.cos(16.0 * t)) * 2.8 - 2.2;
+    const leftHandDy = leftTap;
+    const rightHandDy = rightTap;
+    const leftHandRot = 0;
+    const rightHandRot = 0;
+
+    // Code-reading glance along terminal lines
+    const lookX = Math.sin(5.5 * t) * 2.5;
+    const lookY = 0.5;
 
     // Quadrupled ring particles
     this.particleSpawnTimer += dt;
@@ -365,11 +380,11 @@ export class PetAnimator {
 
     return {
       torso: createTransform(0, torsoDy, torsoRot, 1.0, 1.0),
-      head: createTransform(0, headDy, headRot, 1.0, 1.0),
-      leftHand: createTransform(0, leftHandDy, leftHandRot, 1.0, 1.0),
-      rightHand: createTransform(0, rightHandDy, rightHandRot, 1.0, 1.0),
+      head: createTransform(headDx, headDy, headRot, 1.0, 1.0),
+      leftHand: createTransform(leftHandDx, leftHandDy, leftHandRot, 1.0, 1.0),
+      rightHand: createTransform(rightHandDx, rightHandDy, rightHandRot, 1.0, 1.0),
       lookX,
-      lookY: 0,
+      lookY,
       eyeScaleY: 1.0,
       expression: 'running',
     };
@@ -377,7 +392,7 @@ export class PetAnimator {
 
   /**
    * Choreography 3: NEEDS_INPUT
-   * Inquisitive head tilt (+9 deg / +0.157 rad), right hand thinking at visor, amber question eyes.
+   * Inquisitive upright posture with thinking hand under chin, amber question eyes.
    */
   private computeNeedsInputTarget(dt: number): RigPose {
     const t = this.totalTime;
@@ -385,23 +400,18 @@ export class PetAnimator {
 
     const torsoDy = bob;
     const headDy = bob - 0.5;
-    const headRot = 0.157 + Math.sin(1.5 * t) * 0.02; // Curious +9 degrees tilt
 
-    // Thinking hand at chin/visor
-    const rightHandDx = -3.0;
-    const rightHandDy = -5.0 + bob * 0.5;
-    const rightHandRot = -0.32;
+    // Thinking hand at chin/visor (uses gravi_right_hand_think_256.png)
+    const rightHandDy = bob * 0.5;
 
     // Relaxed resting left hand
-    const leftHandDx = 0.5;
     const leftHandDy = 1.5 + bob;
-    const leftHandRot = 0.08;
 
     return {
       torso: createTransform(0, torsoDy, 0, 1.0, 1.0),
-      head: createTransform(1.0, headDy, headRot, 1.0, 1.0),
-      leftHand: createTransform(leftHandDx, leftHandDy, leftHandRot, 1.0, 1.0),
-      rightHand: createTransform(rightHandDx, rightHandDy, rightHandRot, 1.0, 1.0),
+      head: createTransform(0, headDy, 0, 1.0, 1.0),
+      leftHand: createTransform(0, leftHandDy, 0, 1.0, 1.0),
+      rightHand: createTransform(0, rightHandDy, 0, 1.0, 1.0),
       lookX: 1.5, // Looking up and right questioningly
       lookY: -1.0,
       eyeScaleY: 1.0,
@@ -438,22 +448,22 @@ export class PetAnimator {
       leftHandDy = 3.0 * tau;
       rightHandDy = 3.0 * tau;
     } else if (t < 0.65) {
-      // Phase 2: Victory Leap & Cheer (Apex dy = -7.0, Hands dy = -9.0, ZERO 360 SPIN!)
+      // Phase 2: Victory Leap & Cheer (Apex dy = -7.0, Hands dy = -9.0, zero rotation staircases)
       const tau = (t - 0.15) / 0.50;
       const jumpArc = 4.0 * tau * (1.0 - tau); // Parabolic 0 -> 1 -> 0
 
       torsoDy = 2.5 * (1.0 - tau) - 7.0 * jumpArc;
       headDy = torsoDy - 1.0 * jumpArc;
-      headRot = Math.sin(12.0 * (t - 0.15)) * 0.08; // Joyous head wobble
+      headRot = 0;
 
       torsoScaleY = 1.0 + 0.15 * jumpArc;
       torsoScaleX = 1.0 - 0.10 * jumpArc;
 
-      // Both hands thrown high in celebratory cheer
+      // Both hands raised high in celebratory cheer (uses gravi_*_hand_up_256.png)
       leftHandDy = -9.0 * jumpArc;
       rightHandDy = -9.0 * jumpArc;
-      leftHandRot = 0.45 * jumpArc;
-      rightHandRot = -0.45 * jumpArc;
+      leftHandRot = 0;
+      rightHandRot = 0;
     } else if (t < 1.20) {
       // Phase 3: Soft springy landing with decaying rebound
       const tau = (t - 0.65) / 0.55;
@@ -462,19 +472,21 @@ export class PetAnimator {
 
       torsoDy = rebound;
       headDy = rebound * 0.8;
+      headRot = 0;
       leftHandDy = -4.0 * decay + rebound;
       rightHandDy = -4.0 * decay + rebound;
-      leftHandRot = 0.35 * decay;
-      rightHandRot = -0.35 * decay;
+      leftHandRot = 0;
+      rightHandRot = 0;
     } else {
       // Phase 4: Continuing Joyous Cheer Hover
       const loopT = t - 1.20;
       torsoDy = Math.sin(3.0 * loopT) * 1.8;
       headDy = torsoDy;
+      headRot = 0;
       leftHandDy = -5.0 + Math.sin(3.0 * loopT) * 1.0;
       rightHandDy = -5.0 + Math.sin(3.0 * loopT) * 1.0;
-      leftHandRot = 0.38;
-      rightHandRot = -0.38;
+      leftHandRot = 0;
+      rightHandRot = 0;
     }
 
     return {
@@ -504,19 +516,16 @@ export class PetAnimator {
     const bob = Math.sin(1.2 * this.totalTime) * 0.8;
     const torsoDy = 3.5 + bob;
     const headDy = 3.5 + bob;
-    const headRot = 0.04;
 
     // Limply drooping hands
     const leftHandDy = 5.0 + bob;
     const rightHandDy = 5.0 + bob;
-    const leftHandRot = -0.22;
-    const rightHandRot = 0.22;
 
     return {
       torso: createTransform(shudder, torsoDy, 0, 1.02, 0.98),
-      head: createTransform(shudder * 1.2, headDy, headRot, 1.0, 1.0),
-      leftHand: createTransform(0, leftHandDy, leftHandRot, 1.0, 1.0),
-      rightHand: createTransform(0, rightHandDy, rightHandRot, 1.0, 1.0),
+      head: createTransform(shudder * 1.2, headDy, 0, 1.0, 1.0),
+      leftHand: createTransform(0, leftHandDy, 0, 1.0, 1.0),
+      rightHand: createTransform(0, rightHandDy, 0, 1.0, 1.0),
       lookX: 0,
       lookY: 1.0,
       eyeScaleY: 1.0,
@@ -620,25 +629,52 @@ export class PetAnimator {
    */
   private computeSleepingTarget(dt: number): RigPose {
     const bob = Math.sin(1.0 * this.totalTime) * 0.8;
-    const headRot = 0.05;
     const headDy = bob + 1.0;
 
-    // Spawn sleep particles 'Z' / 'z' every 1.8 seconds
+    // Spawn sleep particles 'Z' / 'z' every 0.95 seconds
     this.particleSpawnTimer += dt;
-    if (this.particleSpawnTimer >= 1.8) {
+    if (this.particleSpawnTimer >= 0.95) {
       this.particleSpawnTimer = 0;
-      this.spawnSleepParticle(38, 16);
+      this.spawnSleepParticle(40, 18);
     }
 
     return {
       torso: createTransform(0, bob, 0, 1.0, 1.0),
-      head: createTransform(0, headDy, headRot, 1.0, 1.0),
+      head: createTransform(0, headDy, 0, 1.0, 1.0),
       leftHand: createTransform(0, bob + 0.6, 0, 1.0, 1.0),
       rightHand: createTransform(0, bob + 0.6, 0, 1.0, 1.0),
       lookX: 0,
       lookY: 1.0,
       eyeScaleY: 0.2,
       expression: 'sleeping',
+    };
+  }
+
+  /**
+   * Choreography 9: THINKING
+   * Pensive hover, upright head, right hand gently tapping chin, thoughtful Astro Bot gaze.
+   */
+  private computeThinkingTarget(dt: number): RigPose {
+    const t = this.totalTime;
+    const torsoDy = Math.sin(1.8 * t) * 1.5;
+    const headDy = torsoDy - 0.8;
+
+    // Right hand at chin tapping gently (gravi_right_hand_think_256.png)
+    const rightHandDy = torsoDy + Math.sin(5.0 * t) * 0.8;
+    const leftHandDy = torsoDy * 0.8;
+
+    const lookX = Math.sin(1.2 * t) * 1.8;
+    const lookY = -1.0;
+
+    return {
+      torso: createTransform(0, torsoDy, 0, 1.0, 1.0),
+      head: createTransform(0, headDy, 0, 1.0, 1.0),
+      leftHand: createTransform(0, leftHandDy, 0, 1.0, 1.0),
+      rightHand: createTransform(0, rightHandDy, 0, 1.0, 1.0),
+      lookX,
+      lookY,
+      eyeScaleY: 1.0,
+      expression: 'thinking',
     };
   }
 
@@ -747,15 +783,16 @@ export class PetAnimator {
   }
 
   private spawnSleepParticle(startX: number, startY: number): void {
-    const isBig = Math.random() > 0.5;
+    this.sleepParticleToggle = !this.sleepParticleToggle;
+    const isBig = this.sleepParticleToggle;
     this.particles.push({
       x: startX,
       y: startY,
-      vx: 1.5 + Math.random() * 1.5,
-      vy: -4 - Math.random() * 3,
-      life: 1.8,
-      maxLife: 1.8,
-      color: '#94A3B8',
+      vx: 1.8,
+      vy: -6.5,
+      life: 2.4,
+      maxLife: 2.4,
+      color: '#7DD3FC',
       size: isBig ? 6 : 4,
       text: isBig ? 'Z' : 'z',
     });

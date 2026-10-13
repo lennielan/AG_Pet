@@ -207,6 +207,12 @@ for c in comps:
             else:
                 torso_arr[y, x] = trans_arr[y, x]
 
+# Recolor base eyes in visor on head_arr to match dark screen background (#1D2144):
+C_VISOR_BG = [29, 33, 68, 255] # #1D2144
+visor_slice = head_arr[320:400, 380:645]
+is_eye = (visor_slice[:, :, 1] > 90) | (visor_slice[:, :, 0] > 60) | (visor_slice[:, :, 2] > 140)
+visor_slice[is_eye] = C_VISOR_BG
+
 # Extend dark neck collar on torso layer (Y=455..480) to eliminate transparent gap during head tilt/lift:
 torso_arr[465:481, 340:685] = C_OUTLINE
 torso_arr[455:465, 360:665] = C_OUTLINE
@@ -254,6 +260,33 @@ torso256 = crop_to_256(torso_img)
 lh256 = crop_to_256(lh_img)
 rh256 = crop_to_256(rh_img)
 
+# Generate 3 Alternate Hand Sprites (256x256)
+# 1. Right hand think (fingers pointing up to chin at X=152, Y=116)
+rh_box = rh256.getbbox()
+rh_crop = rh256.crop(rh_box)
+rh_flip = rh_crop.transpose(Image.FLIP_TOP_BOTTOM)
+
+rh_think_256 = Image.new('RGBA', (256, 256), (0, 0, 0, 0))
+tx = 152 - rh_flip.width // 2
+ty = 116 - rh_flip.height // 2
+rh_think_256.paste(rh_flip, (tx, ty), rh_flip)
+
+# 2. Right hand up (fingers up at shoulder/earphone X=194, Y=108)
+rh_up_256 = Image.new('RGBA', (256, 256), (0, 0, 0, 0))
+rx = 194 - rh_flip.width // 2
+ry = 108 - rh_flip.height // 2
+rh_up_256.paste(rh_flip, (rx, ry), rh_flip)
+
+# 3. Left hand up (fingers up at shoulder/earphone X=62, Y=108)
+lh_box = lh256.getbbox()
+lh_crop = lh256.crop(lh_box)
+lh_flip = lh_crop.transpose(Image.FLIP_TOP_BOTTOM)
+
+lh_up_256 = Image.new('RGBA', (256, 256), (0, 0, 0, 0))
+lx = 62 - lh_flip.width // 2
+ly = 108 - lh_flip.height // 2
+lh_up_256.paste(lh_flip, (lx, ly), lh_flip)
+
 # Export primary 1024x1024 master assets
 white_img.save(os.path.join(out_clean_dir, 'gravi_clean_white_1024.png'), 'PNG')
 trans_img.save(os.path.join(out_clean_dir, 'gravi_clean_transparent_1024.png'), 'PNG')
@@ -268,13 +301,24 @@ for dest_dir in [out_clean_dir, renderer_assets_dir, dist_assets_dir]:
     canvas128.save(os.path.join(dest_dir, 'gravi_cropped_128.png'), 'PNG')
     canvas512.save(os.path.join(dest_dir, 'gravi_cropped_512.png'), 'PNG')
     
-    # 4 Skeletal Part Assets
+    # Skeletal Part Assets
     head256.save(os.path.join(dest_dir, 'gravi_head_256.png'), 'PNG')
     torso256.save(os.path.join(dest_dir, 'gravi_torso_256.png'), 'PNG')
     lh256.save(os.path.join(dest_dir, 'gravi_left_hand_256.png'), 'PNG')
     rh256.save(os.path.join(dest_dir, 'gravi_right_hand_256.png'), 'PNG')
+    rh_think_256.save(os.path.join(dest_dir, 'gravi_right_hand_think_256.png'), 'PNG')
+    rh_up_256.save(os.path.join(dest_dir, 'gravi_right_hand_up_256.png'), 'PNG')
+    lh_up_256.save(os.path.join(dest_dir, 'gravi_left_hand_up_256.png'), 'PNG')
 
-for name, img_part in [('gravi_head_256.png', head256), ('gravi_torso_256.png', torso256), ('gravi_left_hand_256.png', lh256), ('gravi_right_hand_256.png', rh256)]:
+for name, img_part in [
+    ('gravi_head_256.png', head256),
+    ('gravi_torso_256.png', torso256),
+    ('gravi_left_hand_256.png', lh256),
+    ('gravi_right_hand_256.png', rh256),
+    ('gravi_right_hand_think_256.png', rh_think_256),
+    ('gravi_right_hand_up_256.png', rh_up_256),
+    ('gravi_left_hand_up_256.png', lh_up_256),
+]:
     img_part.save(os.path.join(artifact_dir, name), 'PNG')
 
-print('All 4 skeletal rigging parts cleanly generated and exported with neck collar and zero transparent gap!')
+print('All skeletal rigging parts including alternate hands cleanly generated and exported!')

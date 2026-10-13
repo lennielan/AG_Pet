@@ -119,6 +119,9 @@ export class TranscriptWatcher extends EventEmitter {
   private pollTimer: NodeJS.Timeout | null = null;
   private isPollingActive: boolean = false;
   private emittedLines: string[] = [];
+  private inactivityTimer: NodeJS.Timeout | null = null;
+  private readyToIdleTimer: NodeJS.Timeout | null = null;
+  private lastSessionMtime: number = 0;
 
   constructor(options: TranscriptWatcherOptions = {}) {
     super();
@@ -133,6 +136,82 @@ export class TranscriptWatcher extends EventEmitter {
 
     if (options.autoStart) {
       this.start();
+    }
+  }
+
+  /**
+   * Returns the directory of the current active session.
+   */
+  public getActiveSessionDir(): string | null {
+    if (!this.currentFilePath) return null;
+    try {
+      const normalized = path.resolve(this.currentFilePath);
+      const sysGenIndex = normalized.indexOf('.system_generated');
+      if (sysGenIndex !== -1) {
+        return normalized.substring(0, sysGenIndex - 1);
+      }
+      return path.dirname(normalized);
+    } catch (_e) {
+      return null;
+    }
+  }
+
+  /**
+   * Records active agent work: emits 'running', resets 4s inactivity timer,
+   * then auto-transitions to 'ready' (for 3s) and back to 'idle'.
+   */
+  public recordActivity(summary = 'Agent is active'): void {
+    if (this.readyToIdleTimer) {
+      clearTimeout(this.readyToIdleTimer);
+      this.readyToIdleTimer = null;
+    }
+    if (this.inactivityTimer) {
+      clearTimeout(this.inactivityTimer);
+      this.inactivityTimer = null;
+    }
+
+    this.emit('activity', {
+      state: 'running',
+      summary,
+      timestamp: Date.now(),
+    });
+
+    // 7 seconds of inactivity debounce to allow multi-step tasks to proceed without premature ready
+    this.inactivityTimer = setTimeout(() => {
+      this.inactivityTimer = null;
+      this.emit('activity', {
+        state: 'ready',
+        summary: 'Task completed',
+        timestamp: Date.now(),
+      });
+
+      // 1.8 seconds celebration before returning to idle
+      this.readyToIdleTimer = setTimeout(() => {
+        this.readyToIdleTimer = null;
+        this.emit('activity', {
+          state: 'idle',
+          summary: 'Idle',
+          timestamp: Date.now(),
+        });
+      }, 1800);
+      if (typeof this.readyToIdleTimer.unref === 'function') {
+        this.readyToIdleTimer.unref();
+      }
+    }, 7000);
+
+    if (typeof this.inactivityTimer.unref === 'function') {
+      this.inactivityTimer.unref();
+    }
+  }
+
+  public cancelInactivityTimer(): void {
+    if (this.inactivityTimer) {
+      clearTimeout(this.inactivityTimer);
+      this.inactivityTimer = null;
+    }
+    if (this.readyToIdleTimer) {
+      clearTimeout(this.readyToIdleTimer);
+      this.readyToIdleTimer = null;
     }
   }
 
@@ -182,6 +261,7 @@ export class TranscriptWatcher extends EventEmitter {
       clearInterval(this.pollTimer);
       this.pollTimer = null;
     }
+    this.cancelInactivityTimer();
     this.isPollingActive = false;
   }
 
@@ -199,6 +279,20 @@ export class TranscriptWatcher extends EventEmitter {
         this.lastOffset = 0; // New session starts from 0
         this.emit('session_changed', newestFile, oldFile);
       }
+    }
+
+    // 2. Check if active session directory files are being modified
+    const sessionDir = this.getActiveSessionDir();
+    if (sessionDir && fs.existsSync(sessionDir)) {
+      try {
+        const dirStat = fs.statSync(sessionDir);
+        if (dirStat.mtimeMs > this.lastSessionMtime) {
+          if (this.lastSessionMtime > 0) {
+            this.recordActivity('Processing session updates...');
+          }
+          this.lastSessionMtime = dirStat.mtimeMs;
+        }
+      } catch (_e) {}
     }
 
     if (!this.currentFilePath || !fs.existsSync(this.currentFilePath)) {

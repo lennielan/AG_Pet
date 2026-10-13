@@ -72,7 +72,7 @@ module.exports = {
           thinking: { text: 'Considering algorithm choice...' }
         });
         const extracted = TestHarness.parseTranscriptLine(line);
-        assert.strictEqual(extracted.state, 'running');
+        assert.strictEqual(extracted.state, 'thinking');
         assert.strictEqual(extracted.summary, 'Thinking...');
       }
     }

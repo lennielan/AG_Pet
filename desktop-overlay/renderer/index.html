@@ -9,7 +9,7 @@
 <body>
   <div id="pet-container" class="pet-container">
     <!-- Pet Canvas Drag Region -->
-    <div id="drag-region" class="drag-region" title="Click to wave & focus Antigravity IDE • Drag to move">
+    <div id="drag-region" class="drag-region">
       <!-- Interactive Status Badge (Activity Tooltip) -->
       <div id="status-badge" class="status-badge">
         <span id="status-dot" class="status-dot"></span>
@@ -44,6 +44,9 @@
         <div class="state-chips-grid" id="test-state-submenu">
           <button type="button" class="state-chip submenu-item" data-state="idle" id="state-opt-idle">
             <span class="state-dot dot-idle">●</span>Idle
+          </button>
+          <button type="button" class="state-chip submenu-item" data-state="thinking" id="state-opt-thinking">
+            <span class="state-dot dot-thinking">●</span>Think
           </button>
           <button type="button" class="state-chip submenu-item" data-state="running" id="state-opt-running">
             <span class="state-dot dot-running">●</span>Running

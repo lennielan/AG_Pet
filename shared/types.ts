@@ -14,7 +14,8 @@ export type AgentState =
   | 'blocked'
   | 'dragging'
   | 'waving'
-  | 'sleeping';
+  | 'sleeping'
+  | 'thinking';
 
 /**
  * Supported integer scaling factors for pixel-perfect rendering.
@@ -137,6 +138,7 @@ export type EyeExpression =
   | 'waving'
   | 'dragging'
   | 'sleeping'
+  | 'thinking'
   | 'blink';
 
 /**

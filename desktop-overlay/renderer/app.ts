@@ -86,6 +86,7 @@ export class PetOverlayRendererApp {
   private isIgnoringMouse = true;
   private sleepTimer: any = null;
   private lastMoveCheckTime = 0;
+  private lastPersistentSummary = 'Idle';
 
   constructor(canvas: HTMLCanvasElement, initialConfig: Partial<PetConfig> = {}) {
     this.canvas = canvas;
@@ -94,14 +95,7 @@ export class PetOverlayRendererApp {
       ...initialConfig,
     };
 
-    // Initialize PetEngine from sprite-engine
-    this.petEngine = new PetEngine(this.canvas, {
-      scale: this.config.scale,
-      muted: this.config.isMuted,
-      volume: 0.3,
-    });
-
-    // Initialize UI Components
+    // Initialize UI Components first
     this.statusBadge = new StatusBadge();
     this.contextMenu = new ContextMenuController(this.config, {
       onScaleChange: (scale) => this.handleScaleChange(scale),
@@ -109,6 +103,20 @@ export class PetOverlayRendererApp {
       onHide: () => this.handleHide(),
       onPersist: (cfg) => this.persistConfig(cfg),
       onTestState: (state) => this.handleTestState(state),
+      onClose: () => {
+        this.setIgnoreMouse(true);
+      },
+    });
+
+    // Initialize PetEngine with synchronized state change listener
+    this.petEngine = new PetEngine(this.canvas, {
+      scale: this.config.scale,
+      muted: this.config.isMuted,
+      volume: 0.3,
+      onStateChange: (state) => {
+        this.statusBadge.updateState(state, this.lastPersistentSummary);
+        this.contextMenu.setActiveState(state);
+      },
     });
 
     // Wire Click & Focus logic
@@ -180,15 +188,6 @@ export class PetOverlayRendererApp {
     if (dragRegion) {
       this.dragController.bindElement(dragRegion);
 
-      // Tooltip Hover Listeners
-      dragRegion.addEventListener('mouseenter', () => {
-        this.statusBadge.onMouseEnter();
-      });
-
-      dragRegion.addEventListener('mouseleave', () => {
-        this.statusBadge.onMouseLeave();
-      });
-
       // Context Menu Trigger
       dragRegion.addEventListener('contextmenu', (e) => {
         e.preventDefault();
@@ -244,28 +243,29 @@ export class PetOverlayRendererApp {
       if (now - this.lastMoveCheckTime < 16) return;
       this.lastMoveCheckTime = now;
 
-      // If context menu is open or pet is dragging, never ignore mouse
-      if (this.contextMenu.isVisible() || this.dragController.isDragging()) {
-        this.setIgnoreMouse(false);
-        this.resetSleepTimer();
-        return;
-      }
-
-      // Check status badge hover bounds
-      if (this.statusBadge.isVisible()) {
-        const badgeEl = document.getElementById('status-badge');
-        if (badgeEl) {
-          const bRect = badgeEl.getBoundingClientRect();
+      // If context menu is open, check whether cursor is within menu bounds
+      if (this.contextMenu.isVisible()) {
+        const menuEl = document.getElementById('context-menu');
+        if (menuEl) {
+          const mRect = menuEl.getBoundingClientRect();
           if (
-            e.clientX >= bRect.left &&
-            e.clientX <= bRect.right &&
-            e.clientY >= bRect.top &&
-            e.clientY <= bRect.bottom
+            e.clientX >= mRect.left &&
+            e.clientX <= mRect.right &&
+            e.clientY >= mRect.top &&
+            e.clientY <= mRect.bottom
           ) {
             this.setIgnoreMouse(false);
+            this.resetSleepTimer();
             return;
           }
         }
+      }
+
+      // If pet is actively dragging, never ignore mouse
+      if (this.dragController.isDragging()) {
+        this.setIgnoreMouse(false);
+        this.resetSleepTimer();
+        return;
       }
 
       // Check canvas bounding box
@@ -277,6 +277,7 @@ export class PetOverlayRendererApp {
         e.clientY > cRect.bottom
       ) {
         this.setIgnoreMouse(true);
+        this.statusBadge.onMouseLeave();
         return;
       }
 
@@ -298,6 +299,7 @@ export class PetOverlayRendererApp {
 
       if (w <= 0 || h <= 0) {
         this.setIgnoreMouse(true);
+        this.statusBadge.onMouseLeave();
         return;
       }
 
@@ -313,9 +315,11 @@ export class PetOverlayRendererApp {
 
         if (hasOpaquePixel) {
           this.setIgnoreMouse(false);
+          this.statusBadge.onMouseEnter();
           this.resetSleepTimer();
         } else {
           this.setIgnoreMouse(true);
+          this.statusBadge.onMouseLeave();
         }
       } catch (_e) {
         this.setIgnoreMouse(false);
@@ -325,6 +329,7 @@ export class PetOverlayRendererApp {
     window.addEventListener('mouseleave', () => {
       if (!this.contextMenu.isVisible() && !this.dragController.isDragging()) {
         this.setIgnoreMouse(true);
+        this.statusBadge.onMouseLeave();
       }
     });
   }
@@ -399,6 +404,11 @@ export class PetOverlayRendererApp {
       }
     });
 
+    ipcRenderer.on('close_context_menu', () => {
+      this.contextMenu.hide();
+      this.setIgnoreMouse(true);
+    });
+
     ipcRenderer.on('config_update', (_event: any, updates: Partial<PetConfig>) => {
       this.config = { ...this.config, ...updates };
       if (updates.scale) {
@@ -412,8 +422,12 @@ export class PetOverlayRendererApp {
   }
 
   public updateState(payload: StatePayload): void {
+    if (payload.state !== 'dragging' && payload.state !== 'waving') {
+      this.lastPersistentSummary = payload.summary;
+    }
     this.petEngine.setState(payload.state, true);
     this.statusBadge.updateState(payload.state, payload.summary);
+    this.contextMenu.setActiveState(payload.state);
     if (payload.state !== 'sleeping') {
       this.resetSleepTimer();
     }
