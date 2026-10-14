@@ -189,8 +189,7 @@ for y in range(H):
 
 lh_arr = np.zeros_like(trans_arr)
 rh_arr = np.zeros_like(trans_arr)
-head_arr = np.zeros_like(trans_arr)
-torso_arr = np.zeros_like(trans_arr)
+body_arr = np.zeros_like(trans_arr)
 
 for c in comps:
     xs = [pt[0] for pt in c]
@@ -202,25 +201,21 @@ for c in comps:
         for x, y in c: rh_arr[y, x] = trans_arr[y, x]
     else:
         for x, y in c:
-            if y <= 480:
-                head_arr[y, x] = trans_arr[y, x]
-            else:
-                torso_arr[y, x] = trans_arr[y, x]
+            body_arr[y, x] = trans_arr[y, x]
 
-# Recolor base eyes in visor on head_arr to match dark screen background (#1D2144):
+# Recolor base eyes in visor on body_arr to match dark screen background (#1D2144):
 C_VISOR_BG = [29, 33, 68, 255] # #1D2144
-visor_slice = head_arr[320:400, 380:645]
+visor_slice = body_arr[320:400, 380:645]
 is_eye = (visor_slice[:, :, 1] > 90) | (visor_slice[:, :, 0] > 60) | (visor_slice[:, :, 2] > 140)
 visor_slice[is_eye] = C_VISOR_BG
 
-# Extend dark neck collar on torso layer (Y=455..480) to eliminate transparent gap during head tilt/lift:
-torso_arr[465:481, 340:685] = C_OUTLINE
-torso_arr[455:465, 360:665] = C_OUTLINE
-
 lh_img = Image.fromarray(lh_arr, 'RGBA')
 rh_img = Image.fromarray(rh_arr, 'RGBA')
-head_img = Image.fromarray(head_arr, 'RGBA')
-torso_img = Image.fromarray(torso_arr, 'RGBA')
+body_img = Image.fromarray(body_arr, 'RGBA')
+
+# Seamless unified body: head_img is full body, torso_img is clean transparent canvas for backwards compatibility
+head_img = body_img
+torso_img = Image.new('RGBA', (W, H), (0, 0, 0, 0))
 
 # 9. Solid Flat Pure White Version (#FFFFFF)
 white_arr = trans_arr.copy()
@@ -302,6 +297,7 @@ for dest_dir in [out_clean_dir, renderer_assets_dir, dist_assets_dir]:
     canvas512.save(os.path.join(dest_dir, 'gravi_cropped_512.png'), 'PNG')
     
     # Skeletal Part Assets
+    head256.save(os.path.join(dest_dir, 'gravi_body_256.png'), 'PNG')
     head256.save(os.path.join(dest_dir, 'gravi_head_256.png'), 'PNG')
     torso256.save(os.path.join(dest_dir, 'gravi_torso_256.png'), 'PNG')
     lh256.save(os.path.join(dest_dir, 'gravi_left_hand_256.png'), 'PNG')
@@ -311,6 +307,7 @@ for dest_dir in [out_clean_dir, renderer_assets_dir, dist_assets_dir]:
     lh_up_256.save(os.path.join(dest_dir, 'gravi_left_hand_up_256.png'), 'PNG')
 
 for name, img_part in [
+    ('gravi_body_256.png', head256),
     ('gravi_head_256.png', head256),
     ('gravi_torso_256.png', torso256),
     ('gravi_left_hand_256.png', lh256),

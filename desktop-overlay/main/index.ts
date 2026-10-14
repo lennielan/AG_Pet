@@ -5,6 +5,7 @@
 
 import * as path from 'node:path';
 import * as fs from 'node:fs';
+import * as child_process from 'node:child_process';
 import { PetConfig, PetScale, StatePayload } from '../../shared/types';
 import {
   WINDOW_SPEC,
@@ -88,6 +89,10 @@ try {
 const app = electronModule?.app;
 const BrowserWindow = electronModule?.BrowserWindow;
 const ipcMain = electronModule?.ipcMain;
+const Tray = electronModule?.Tray;
+const Menu = electronModule?.Menu;
+const nativeImage = electronModule?.nativeImage;
+const globalShortcut = electronModule?.globalShortcut;
 
 logDebug(`TOP LEVEL LOAD: require.main === module is ${require.main === module}, app exists: ${Boolean(app)}`);
 
@@ -181,6 +186,7 @@ export class OverlayApplication {
   private transcriptWatcher: any = null;
   private stateMachine: any = null;
   private mainWindow: any = null;
+  private tray: any = null;
   private parentPid?: number;
   private wsPort: number;
   private isPetHidden = false;
@@ -233,8 +239,15 @@ export class OverlayApplication {
       logDebug('initAutonomousLogMonitor finished');
       this.initWindow();
       logDebug('initWindow finished');
+      this.initTray();
+      logDebug('initTray finished');
+      this.initGlobalShortcuts();
+      logDebug('initGlobalShortcuts finished');
       this.initIpc();
       logDebug('initIpc finished');
+      if (process.platform === 'win32' && !this.isAutoStartEnabled()) {
+        this.setAutoStartEnabled(true);
+      }
     } catch (err: any) {
       logDebug(`CRITICAL START ERROR: ${err?.stack || err?.message || err}`);
     }
@@ -513,17 +526,13 @@ export class OverlayApplication {
     });
 
     ipcMain.on('set_scale', (_event: any, scale: PetScale) => {
-      this.configManager.updateConfig({ scale });
-      this.configManager.save();
-      if (this.mainWindow && !this.mainWindow.isDestroyed()) {
-        const { width, height } = calculateWindowDimensions(scale);
-        this.mainWindow.setSize(Math.round(width), Math.round(height));
-      }
+      this.setScale(scale);
     });
 
     ipcMain.on('set_muted', (_event: any, isMuted: boolean) => {
       this.configManager.updateConfig({ isMuted });
       this.configManager.save();
+      this.updateTrayMenu();
     });
 
     ipcMain.on('focus_ide', async () => {
@@ -534,18 +543,11 @@ export class OverlayApplication {
     });
 
     ipcMain.on('hide_pet', () => {
-      this.isPetHidden = true;
-      if (this.mainWindow && !this.mainWindow.isDestroyed()) {
-        this.mainWindow.hide();
-      }
+      this.hidePet();
     });
 
     ipcMain.on('show_pet', () => {
-      this.isPetHidden = false;
-      if (this.mainWindow && !this.mainWindow.isDestroyed()) {
-        this.mainWindow.show();
-        this.enforceTopmost();
-      }
+      this.showPet();
     });
 
     ipcMain.on('pet_ready', () => {
@@ -579,8 +581,240 @@ export class OverlayApplication {
     });
   }
 
+  public hidePet(): void {
+    this.isPetHidden = true;
+    if (this.mainWindow && !this.mainWindow.isDestroyed()) {
+      this.mainWindow.webContents.send('hide_pet');
+      this.mainWindow.hide();
+    }
+    this.updateTrayMenu();
+  }
+
+  public showPet(): void {
+    this.isPetHidden = false;
+    if (this.mainWindow && !this.mainWindow.isDestroyed()) {
+      this.mainWindow.show();
+      this.enforceTopmost();
+      if (typeof this.mainWindow.setIgnoreMouseEvents === 'function') {
+        try {
+          this.mainWindow.setIgnoreMouseEvents(true, { forward: true });
+        } catch (_e) {}
+      }
+      this.mainWindow.webContents.send('show_pet');
+    }
+    this.updateTrayMenu();
+  }
+
+  public togglePetVisibility(): void {
+    if (this.isPetHidden || (this.mainWindow && !this.mainWindow.isDestroyed() && !this.mainWindow.isVisible())) {
+      this.showPet();
+    } else {
+      this.hidePet();
+    }
+  }
+
+  public resetPosition(): void {
+    const screen = electronModule?.screen;
+    const config = this.configManager.getConfig();
+    const { width, height } = calculateWindowDimensions(config.scale);
+    let defaultX = 100;
+    let defaultY = 100;
+    if (screen) {
+      try {
+        const primary = screen.getPrimaryDisplay();
+        const { width: sW, height: sH } = primary.workAreaSize;
+        defaultX = Math.max(50, sW - width - 40);
+        defaultY = Math.max(50, sH - height - 40);
+      } catch (_e) {}
+    }
+    if (this.mainWindow && !this.mainWindow.isDestroyed()) {
+      this.mainWindow.setPosition(Math.round(defaultX), Math.round(defaultY));
+    }
+    this.configManager.updateConfig({ x: defaultX, y: defaultY });
+    this.configManager.save();
+    if (this.bridge) {
+      this.bridge.sendConfigUpdate({ x: defaultX, y: defaultY });
+    }
+    this.showPet();
+  }
+
+  public setScale(scale: PetScale): void {
+    this.configManager.updateConfig({ scale });
+    this.configManager.save();
+    if (this.mainWindow && !this.mainWindow.isDestroyed()) {
+      const { width, height } = calculateWindowDimensions(scale);
+      this.mainWindow.setSize(Math.round(width), Math.round(height));
+      this.mainWindow.webContents.send('config_update', { scale });
+    }
+    if (this.bridge) {
+      this.bridge.sendConfigUpdate({ scale });
+    }
+    this.updateTrayMenu();
+  }
+
+  public toggleMute(): void {
+    const config = this.configManager.getConfig();
+    const isMuted = !config.isMuted;
+    this.configManager.updateConfig({ isMuted });
+    this.configManager.save();
+    if (this.mainWindow && !this.mainWindow.isDestroyed()) {
+      this.mainWindow.webContents.send('config_update', { isMuted });
+    }
+    if (this.bridge) {
+      this.bridge.sendConfigUpdate({ isMuted });
+    }
+    this.updateTrayMenu();
+  }
+
+  public isAutoStartEnabled(): boolean {
+    if (process.platform !== 'win32') return false;
+    try {
+      const stdout = child_process.execSync(
+        'reg query "HKCU\\Software\\Microsoft\\Windows\\CurrentVersion\\Run" /v AGPet',
+        { stdio: ['ignore', 'pipe', 'ignore'], encoding: 'utf8' }
+      );
+      return stdout.includes('AGPet');
+    } catch (_e) {
+      return false;
+    }
+  }
+
+  public setAutoStartEnabled(enabled: boolean): void {
+    if (process.platform !== 'win32') return;
+    try {
+      if (enabled) {
+        const vbsCandidate = path.resolve(__dirname, '../../../scripts/launch-service.vbs');
+        const vbsPath = fs.existsSync(vbsCandidate) ? vbsCandidate : 'd:\\Projects\\AG_Pet\\scripts\\launch-service.vbs';
+        const cmd = `reg add "HKCU\\Software\\Microsoft\\Windows\\CurrentVersion\\Run" /v AGPet /t REG_SZ /d "wscript.exe \\"${vbsPath}\\"" /f`;
+        child_process.execSync(cmd, { stdio: 'ignore' });
+        logDebug('Auto-start enabled in Windows registry');
+      } else {
+        child_process.execSync(
+          'reg delete "HKCU\\Software\\Microsoft\\Windows\\CurrentVersion\\Run" /v AGPet /f',
+          { stdio: 'ignore' }
+        );
+        logDebug('Auto-start disabled in Windows registry');
+      }
+    } catch (err: any) {
+      logDebug(`setAutoStartEnabled error: ${err?.message || err}`);
+    }
+    this.updateTrayMenu();
+  }
+
+  private initTray(): void {
+    if (!Tray || !Menu || !nativeImage) {
+      logDebug('initTray: Tray, Menu, or nativeImage not available');
+      return;
+    }
+
+    try {
+      const candidateIconPaths = [
+        path.join(__dirname, '../renderer/assets/gravi_head_256.png'),
+        path.join(__dirname, '../../renderer/assets/gravi_head_256.png'),
+        path.join(__dirname, 'renderer/assets/gravi_head_256.png'),
+        path.join(process.cwd(), 'desktop-overlay/dist/desktop-overlay/renderer/assets/gravi_head_256.png'),
+        path.join(process.cwd(), 'desktop-overlay/renderer/assets/gravi_head_256.png'),
+        path.join(process.cwd(), 'assets/clean/gravi_head_256.png'),
+        path.join(process.cwd(), 'assets/clean/gravi_cropped_128.png'),
+      ];
+      const iconPath = candidateIconPaths.find((p) => fs.existsSync(p));
+      if (!iconPath) {
+        logDebug('initTray: No icon asset found on disk');
+        return;
+      }
+
+      const trayIcon = nativeImage.createFromPath(iconPath).resize({ width: 16, height: 16 });
+      this.tray = new Tray(trayIcon);
+      this.tray.setToolTip('Грави — компаньон Antigravity (Ctrl+Shift+G)');
+
+      this.tray.on('click', () => {
+        logDebug('Tray icon clicked: calling showPet()');
+        this.showPet();
+      });
+
+      this.updateTrayMenu();
+      logDebug('initTray: System tray initialized successfully');
+    } catch (err: any) {
+      logDebug(`initTray error: ${err?.message || err}`);
+    }
+  }
+
+  private updateTrayMenu(): void {
+    if (!this.tray || !Menu) return;
+
+    try {
+      const config = this.configManager.getConfig();
+      const isAuto = this.isAutoStartEnabled();
+      const contextMenu = Menu.buildFromTemplate([
+        {
+          label: this.isPetHidden ? 'Показать Грави (Ctrl+Shift+G)' : 'Скрыть Грави (Ctrl+Shift+G)',
+          click: () => this.togglePetVisibility(),
+        },
+        {
+          label: 'Сбросить позицию (в угол экрана)',
+          click: () => this.resetPosition(),
+        },
+        {
+          label: 'Масштаб',
+          submenu: ([1.0, 1.5, 2.0] as PetScale[]).map((s) => ({
+            label: `${s.toFixed(1)}x`,
+            type: 'radio' as const,
+            checked: config.scale === s,
+            click: () => this.setScale(s),
+          })),
+        },
+        {
+          label: config.isMuted ? 'Включить звук' : 'Выключить звук',
+          click: () => this.toggleMute(),
+        },
+        {
+          label: 'Автозапуск с Windows',
+          type: 'checkbox' as const,
+          checked: isAuto,
+          click: (item: any) => this.setAutoStartEnabled(item.checked),
+        },
+        {
+          type: 'separator' as const,
+        },
+        {
+          label: 'Выход из AG Pet',
+          click: () => this.terminate(),
+        },
+      ]);
+      this.tray.setContextMenu(contextMenu);
+    } catch (err: any) {
+      logDebug(`updateTrayMenu error: ${err?.message || err}`);
+    }
+  }
+
+  private initGlobalShortcuts(): void {
+    if (!globalShortcut || typeof globalShortcut.register !== 'function') {
+      return;
+    }
+    try {
+      globalShortcut.register('CommandOrControl+Shift+G', () => {
+        logDebug('Global shortcut CommandOrControl+Shift+G triggered');
+        this.togglePetVisibility();
+      });
+      logDebug('Global shortcut CommandOrControl+Shift+G registered successfully');
+    } catch (err: any) {
+      logDebug(`Failed to register global shortcut: ${err?.message || err}`);
+    }
+  }
+
   public terminate(): void {
     logDebug('OverlayApplication.terminate() called!');
+    if (globalShortcut && typeof globalShortcut.unregisterAll === 'function') {
+      try {
+        globalShortcut.unregisterAll();
+      } catch (_e) {}
+    }
+    if (this.tray && typeof this.tray.destroy === 'function') {
+      try {
+        this.tray.destroy();
+        this.tray = null;
+      } catch (_e) {}
+    }
     if (this.watchdog) {
       this.watchdog.stop();
     }
@@ -613,6 +847,10 @@ export class OverlayApplication {
 
   public getWatchdog(): PIDWatchdog | null {
     return this.watchdog;
+  }
+
+  public getTray(): any {
+    return this.tray;
   }
 }
 

@@ -56,7 +56,7 @@ html, body {
   display: flex;
   align-items: center;
   gap: 6px;
-  padding: 4px 8px;
+  padding: 4px 10px;
   background: #181C32;
   border: 2px solid #3B4268;
   border-radius: 2px;
@@ -65,8 +65,9 @@ html, body {
   pointer-events: none;
   transition: opacity 0.15s ease, transform 0.15s ease;
   z-index: 50;
-  max-width: 95%;
-  white-space: nowrap;
+  width: max-content;
+  min-width: 90px;
+  max-width: 270px;
 }
 
 .status-badge.visible {
@@ -133,15 +134,33 @@ html, body {
   animation: stepBlink 1.4s infinite steps(2);
 }
 
+.status-icon {
+  width: 10px;
+  height: 10px;
+  min-width: 10px;
+  min-height: 10px;
+  image-rendering: pixelated;
+  image-rendering: crisp-edges;
+  display: inline-block;
+  vertical-align: middle;
+}
+
 .status-text {
   color: #E2E8F0;
   font-family: 'Consolas', 'Courier New', monospace;
   font-size: 11px;
   font-weight: 600;
-  white-space: nowrap;
+  letter-spacing: 0.2px;
+  white-space: normal;
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
   overflow: hidden;
   text-overflow: ellipsis;
-  letter-spacing: 0.2px;
+  line-height: 1.25;
+  max-width: 235px;
+  text-align: left;
+  word-break: break-word;
 }
 
 #pet-canvas {

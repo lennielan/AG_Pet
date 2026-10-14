@@ -23,6 +23,7 @@ export class PetRenderer {
   private lastTime = 0;
   private masterSpriteImage: any = null;
   private masterSpriteLoaded = false;
+  private bodyImage: any = null;
   private headImage: any = null;
   private torsoImage: any = null;
   private leftHandImage: any = null;
@@ -86,6 +87,10 @@ export class PetRenderer {
             }
           }
         };
+
+        this.bodyImage = new Image();
+        this.bodyImage.onload = onPartLoaded;
+        this.bodyImage.src = 'assets/gravi_body_256.png';
 
         this.headImage = new Image();
         this.headImage.onload = onPartLoaded;
@@ -184,6 +189,10 @@ export class PetRenderer {
   public start(): void {
     if (this.isRunning) return;
     this.isRunning = true;
+    if (this.animFrameId !== null && typeof cancelAnimationFrame === 'function') {
+      cancelAnimationFrame(this.animFrameId);
+      this.animFrameId = null;
+    }
     this.lastTime = typeof performance !== 'undefined' ? performance.now() : Date.now();
 
     // Render initial pose synchronously to guarantee immediate paint on window creation
@@ -324,7 +333,8 @@ export class PetRenderer {
 
     const COORD_RATIO = 4.0; // 256 / 64
 
-    // Layer 1: Torso (drawn first with extended collar)
+    // Layer 1: Unified Seamless Body & Screen Visor
+    const bodyImg = (this.bodyImage && this.bodyImage.complete && this.bodyImage.naturalWidth > 0) ? this.bodyImage : this.headImage;
     ctx.save();
     const tPivotX = (this.PIVOTS.torso.x + rig.torso.dx * COORD_RATIO) * scale;
     const tPivotY = (this.PIVOTS.torso.y + rig.torso.dy * COORD_RATIO) * scale;
@@ -334,48 +344,14 @@ export class PetRenderer {
     }
     ctx.scale(rig.torso.scaleX, rig.torso.scaleY);
     ctx.translate(-Math.round(this.PIVOTS.torso.x * scale), -Math.round(this.PIVOTS.torso.y * scale));
-    ctx.drawImage(this.torsoImage, 0, 0, w, h);
-    ctx.restore();
 
-    // Layer 2: Head + Screen Visor & Eyes (bound strictly in head's transformation matrix!)
-    ctx.save();
-    const hPivotX = (this.PIVOTS.head.x + rig.head.dx * COORD_RATIO) * scale;
-    const hPivotY = (this.PIVOTS.head.y + rig.head.dy * COORD_RATIO) * scale;
-    ctx.translate(Math.round(hPivotX), Math.round(hPivotY));
-    if (Math.abs(rig.head.rotation) > 0.08) {
-      ctx.rotate(rig.head.rotation);
-    }
-    ctx.scale(rig.head.scaleX, rig.head.scaleY);
-    ctx.translate(-Math.round(this.PIVOTS.head.x * scale), -Math.round(this.PIVOTS.head.y * scale));
+    // 1a. Draw Seamless Monolithic Body (head, neck, star emblem, torso)
+    ctx.drawImage(bodyImg, 0, 0, w, h);
 
-    // 2a. Draw Head Layer
-    ctx.drawImage(this.headImage, 0, 0, w, h);
-
-    // 2b. Draw Visor Screen & Procedural Eyes inside Head matrix
+    // 1b. Draw Visor Screen & Procedural Eyes inside Body matrix
     this.drawScreenFace(ctx, scale, rig);
 
-    // 2c. Pulsing thought spark or data transmission LED on antenna tip
-    if (rig.expression === 'thinking') {
-      const ax = Math.round(67 * scale);
-      const ay = Math.round(21 * scale);
-      const sparkSize = Math.max(2, Math.round(4 * scale));
-      const isCyan = Math.sin(performance.now() * 0.008) > 0;
-      ctx.fillStyle = isCyan ? '#00F0FF' : '#FFFFFF';
-      ctx.fillRect(ax - Math.round(sparkSize / 2), ay - Math.round(sparkSize / 2), sparkSize, sparkSize);
-    } else if (rig.expression === 'running' || pose?.state === 'running') {
-      const ax = Math.round(67 * scale);
-      const ay = Math.round(21 * scale);
-      const sparkSize = Math.max(2, Math.round(4 * scale));
-      const isCyan = Math.sin(performance.now() * 0.025) > 0;
-      ctx.fillStyle = isCyan ? '#00F0FF' : '#4ADE80';
-      ctx.fillRect(ax - Math.round(sparkSize / 2), ay - Math.round(sparkSize / 2), sparkSize, sparkSize);
-    }
     ctx.restore();
-
-    // Layer 2.5: Holographic Keyboard (rendered between Body and Hands)
-    if (pose?.state === 'running' || rig.expression === 'running') {
-      this.drawHoloKeyboard(ctx, scale, rig);
-    }
 
     // Layer 3: Left Hand (Foreground)
     const isLhUp = (pose?.state === 'ready');
@@ -466,8 +442,8 @@ export class PetRenderer {
       ctx.lineWidth = Math.max(2, 3 * scale);
       ctx.strokeText(p.text, 0, 0);
 
-      // Bright neon cyan glow fill
-      ctx.fillStyle = '#7DD3FC';
+      // Particle fill (cyan for Zzz, coral/pink for hearts)
+      ctx.fillStyle = p.color || '#7DD3FC';
       ctx.fillText(p.text, 0, 0);
 
       ctx.restore();
@@ -475,84 +451,7 @@ export class PetRenderer {
     ctx.restore();
   }
 
-  /**
-   * Renders holographic cyber keyboard in front of torso with interactive key illumination.
-   */
-  private drawHoloKeyboard(ctx: CanvasRenderingContext2D, scale: number, rig: RigPose): void {
-    const u = Math.max(1, Math.round(2 * scale));
-    const kx = Math.round(60 * scale);
-    const ky = Math.round((154 + rig.torso.dy * 2.0) * scale);
-    const kw = Math.round(136 * scale);
-    const kh = Math.round(22 * scale);
 
-    ctx.save();
-
-    // 1. Projection beams from emitter under torso
-    ctx.globalAlpha = 0.22;
-    ctx.fillStyle = '#00F0FF';
-    ctx.fillRect(kx + Math.round(20 * scale), ky - Math.round(6 * scale), kw - Math.round(40 * scale), u);
-    ctx.fillRect(kx + Math.round(10 * scale), ky - Math.round(3 * scale), kw - Math.round(20 * scale), u);
-
-    // 2. Trapezoid holographic backdrop
-    ctx.globalAlpha = 0.82;
-    ctx.fillStyle = '#0F172A';
-    ctx.fillRect(kx + 2 * u, ky, kw - 4 * u, kh);
-    ctx.fillRect(kx, ky + 2 * u, kw, kh - 4 * u);
-
-    // 3. Cybernetic hologram border
-    ctx.globalAlpha = 0.95;
-    ctx.fillStyle = '#0EA5E9';
-    ctx.fillRect(kx, ky + 2 * u, u, kh - 4 * u);
-    ctx.fillRect(kx + kw - u, ky + 2 * u, u, kh - 4 * u);
-    ctx.fillRect(kx + 2 * u, ky + kh - u, kw - 4 * u, u);
-    ctx.fillStyle = '#00F0FF';
-    ctx.fillRect(kx + 2 * u, ky, kw - 4 * u, u);
-
-    // Finger press detection
-    const lhFingerX = (this.PIVOTS.leftHand.x + rig.leftHand.dx * 4.0 + 4) * scale;
-    const rhFingerX = (this.PIVOTS.rightHand.x + rig.rightHand.dx * 4.0 - 4) * scale;
-    const isLeftPressing = rig.leftHand.dy > -0.8;
-    const isRightPressing = rig.rightHand.dy > -0.8;
-
-    // 4. Two rows of 10 keys
-    const startX = kx + Math.round((kw - 58 * u) / 2);
-    for (let row = 0; row < 2; row++) {
-      const keyBaseY = ky + Math.round((3 + row * 4) * u);
-      for (let col = 0; col < 10; col++) {
-        const keyBaseX = startX + col * (6 * u);
-        const keyW = 4 * u;
-        const keyH = 2 * u;
-        const keyCenterX = keyBaseX + keyW / 2;
-
-        const isHitLeft = isLeftPressing && Math.abs(keyCenterX - lhFingerX) < 10 * scale;
-        const isHitRight = isRightPressing && Math.abs(keyCenterX - rhFingerX) < 10 * scale;
-        const isHit = isHitLeft || isHitRight;
-
-        const keyY = isHit ? keyBaseY + Math.max(1, Math.round(scale)) : keyBaseY;
-
-        if (isHit) {
-          ctx.globalAlpha = 1.0;
-          ctx.fillStyle = '#00F0FF';
-          ctx.fillRect(keyBaseX, keyY, keyW, keyH);
-          ctx.fillStyle = '#FFFFFF';
-          ctx.fillRect(keyBaseX + u, keyY, keyW - 2 * u, keyH);
-
-          // Miniature keystroke pixel sparks
-          ctx.fillStyle = '#8CFAFF';
-          ctx.fillRect(keyBaseX + u, keyBaseY - 3 * u, u, u);
-          ctx.fillRect(keyBaseX + keyW - 2 * u, keyBaseY - 4 * u, u, u);
-        } else {
-          ctx.globalAlpha = 0.85;
-          ctx.fillStyle = '#1E3A8A';
-          ctx.fillRect(keyBaseX, keyY, keyW, keyH);
-          ctx.fillStyle = '#38BDF8';
-          ctx.fillRect(keyBaseX, keyY, keyW, u);
-        }
-      }
-    }
-
-    ctx.restore();
-  }
 
   /**
    * Renders procedural facial expressions and visor screen strictly inside the head's coordinate matrix.
@@ -580,32 +479,24 @@ export class PetRenderer {
 
     if (expr === 'running') {
       const u = Math.max(1, Math.round(2 * scale));
-      const codeEy = Math.round((73 + rig.lookY * 2.0) * scale);
-      const codeLx = Math.round((107 + rig.lookX * 2.5) * scale);
-      const codeRx = Math.round((149 + rig.lookX * 2.5) * scale);
+      const pw = Math.max(2, Math.round(3 * scale));
+      const t = (typeof performance !== 'undefined' ? performance.now() : Date.now()) * 0.008;
+      for (let i = -2; i <= 2; i++) {
+        const bx = Math.round((128 + i * 11 + rig.lookX * 1.5) * scale) - Math.floor(pw / 2);
+        const wave = (Math.sin(t - i * 0.9) + 1.0) * 0.5; // 0..1
+        const rawH = (4 + Math.round(wave * 10)) * scale;
+        const barH = Math.max(pw, Math.round(rawH / u) * u);
+        const by = Math.round(79 * scale - barH / 2);
 
-      // 1. Focused cyber-eyes
-      ctx.fillStyle = '#00F0FF';
-      ctx.fillRect(codeLx - 3 * u, codeEy - u, 6 * u, 3 * u);
-      ctx.fillRect(codeRx - 3 * u, codeEy - u, 6 * u, 3 * u);
-      ctx.fillStyle = '#E0F2FE';
-      ctx.fillRect(codeLx - 2 * u, codeEy, 4 * u, u);
-      ctx.fillRect(codeRx - 2 * u, codeEy, 4 * u, u);
-
-      // 2. Terminal code stream in lower visor
-      const codeY = screenTop + screenH - 4 * u;
-      ctx.fillStyle = '#38BDF8';
-      ctx.fillRect(screenLeft + 3 * u, codeY, 8 * u, u);
-      ctx.fillStyle = '#34D399';
-      ctx.fillRect(screenLeft + 13 * u, codeY, 12 * u, u);
-      ctx.fillStyle = '#38BDF8';
-      ctx.fillRect(screenLeft + 27 * u, codeY, 6 * u, u);
-
-      // Blinking terminal cursor
-      const isBlink = Math.floor(performance.now() * 0.005) % 2 === 0;
-      if (isBlink) {
+        // Основной цвет полоски — фирменный голубой #00F0FF
         ctx.fillStyle = '#00F0FF';
-        ctx.fillRect(screenLeft + 35 * u, codeY - u, 2 * u, 2 * u);
+        ctx.fillRect(bx, by, pw, barH);
+
+        // Внутренний светлый блик в центре высоких полосок (#8CFAFF)
+        if (barH >= 8 * scale) {
+          ctx.fillStyle = '#8CFAFF';
+          ctx.fillRect(bx, by + u, pw, barH - 2 * u);
+        }
       }
     } else if (expr === 'needs_input') {
       // Amber question eyes '? ?' (#FBBF24)
@@ -680,6 +571,11 @@ export class PetRenderer {
       // Top highlight #8CFAFF: rect 3*u x 2*u
       ctx.fillStyle = '#8CFAFF';
       ctx.fillRect(thinkRx - 2 * u, thinkEy - 2 * u, 3 * u, 2 * u);
+    } else if (expr === 'headpat') {
+      ctx.fillStyle = '#00F0FF';
+      const headpatEy = Math.round(ey - Math.max(1, Math.round(1 * scale)));
+      this.drawEyeArc(ctx, lx, headpatEy, pw, 1.0);
+      this.drawEyeArc(ctx, rx, headpatEy, pw, 1.0);
     } else {
       // Default 'idle' and 'blink': Smiling cyan arches '^ ^' with vertical squash
       ctx.fillStyle = '#00F0FF';
@@ -746,32 +642,26 @@ export class PetRenderer {
 
     if (pose.state === 'running') {
       const u = Math.max(1, Math.round(2 * scale));
-      const codeEy = screenTop + Math.round(8 * scale);
-      const codeLx = screenLeft + Math.round(18 * scale);
-      const codeRx = screenLeft + screenW - Math.round(24 * scale);
+      const pwBar = Math.max(2, Math.round(3 * scale));
+      const t = (typeof performance !== 'undefined' ? performance.now() : Date.now()) * 0.008;
+      const centerX = screenLeft + Math.round(screenW / 2);
+      const centerY = screenTop + Math.round(screenH / 2);
+      for (let i = -2; i <= 2; i++) {
+        const bx = Math.round(centerX + i * 11 * scale) - Math.floor(pwBar / 2);
+        const wave = (Math.sin(t - i * 0.9) + 1.0) * 0.5; // 0..1
+        const rawH = (4 + Math.round(wave * 10)) * scale;
+        const barH = Math.max(pwBar, Math.round(rawH / u) * u);
+        const by = Math.round(centerY - barH / 2);
 
-      // 1. Focused cyber-eyes
-      ctx.fillStyle = '#00F0FF';
-      ctx.fillRect(codeLx - 3 * u, codeEy - u, 6 * u, 3 * u);
-      ctx.fillRect(codeRx - 3 * u, codeEy - u, 6 * u, 3 * u);
-      ctx.fillStyle = '#E0F2FE';
-      ctx.fillRect(codeLx - 2 * u, codeEy, 4 * u, u);
-      ctx.fillRect(codeRx - 2 * u, codeEy, 4 * u, u);
-
-      // 2. Terminal code stream in lower visor
-      const codeY = screenTop + screenH - 4 * u;
-      ctx.fillStyle = '#38BDF8';
-      ctx.fillRect(screenLeft + 3 * u, codeY, 8 * u, u);
-      ctx.fillStyle = '#34D399';
-      ctx.fillRect(screenLeft + 13 * u, codeY, 12 * u, u);
-      ctx.fillStyle = '#38BDF8';
-      ctx.fillRect(screenLeft + 27 * u, codeY, 6 * u, u);
-
-      // Blinking terminal cursor
-      const isBlink = Math.floor(performance.now() * 0.005) % 2 === 0;
-      if (isBlink) {
+        // Основной цвет полоски — фирменный голубой #00F0FF
         ctx.fillStyle = '#00F0FF';
-        ctx.fillRect(screenLeft + 35 * u, codeY - u, 2 * u, 2 * u);
+        ctx.fillRect(bx, by, pwBar, barH);
+
+        // Внутренний светлый блик в центре высоких полосок (#8CFAFF)
+        if (barH >= 8 * scale) {
+          ctx.fillStyle = '#8CFAFF';
+          ctx.fillRect(bx, by + u, pwBar, barH - 2 * u);
+        }
       }
     } else if (pose.state === 'needs_input') {
       // Amber question eyes '? ?' (#FBBF24)

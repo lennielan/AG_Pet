@@ -132,6 +132,18 @@ export class PetEngine {
     this.setState('waving', true);
   }
 
+  public triggerHeadpat(duration = 2.4): void {
+    if (this.currentState === 'sleeping' || this.animator.getPersistentState() === 'sleeping') {
+      this.animator.setPersistentState('idle');
+    }
+    this.animator.triggerHeadpat(duration);
+    this.audio.playPreset('headpat');
+  }
+
+  public getAnimator(): PetAnimator {
+    return this.animator;
+  }
+
   public onDragStart(): void {
     if (this.currentState === 'sleeping' || this.animator.getPersistentState() === 'sleeping') {
       this.animator.setPersistentState('idle');
@@ -158,10 +170,6 @@ export class PetEngine {
 
   public getRenderer(): PetRenderer {
     return this.renderer;
-  }
-
-  public getAnimator(): PetAnimator {
-    return this.animator;
   }
 
   public getAudio(): SoundSynthesizer {

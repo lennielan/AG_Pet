@@ -150,6 +150,9 @@ export class SoundSynthesizer {
       case 'state_change':
         this.playStateChangeInternal();
         break;
+      case 'headpat':
+        this.playHeadpatInternal();
+        break;
     }
 
     return { effectiveGain: this.volume };
@@ -206,6 +209,10 @@ export class SoundSynthesizer {
 
   public playDrag(): void {
     this.playPreset('drag');
+  }
+
+  public playHeadpat(): void {
+    this.playPreset('headpat');
   }
 
   public getSoundHistory(): SoundHistoryEntry[] {
@@ -546,6 +553,54 @@ export class SoundSynthesizer {
         osc.disconnect();
         gain.disconnect();
       };
+    } catch {
+      // Ignore audio scheduling exceptions
+    }
+  }
+
+  /**
+   * Preset: Headpat (Warm, purring ascending 4-note arpeggio with soft vibrato: 523 -> 659 -> 784 -> 987 Hz)
+   */
+  private async playHeadpatInternal(): Promise<void> {
+    if (!(await this.ensureContext()) || !this.ctx || !this.masterGain) return;
+
+    try {
+      const now = this.ctx.currentTime;
+      const notes = [
+        { freq: 523.25, time: 0.00, dur: 0.09 }, // C5
+        { freq: 659.25, time: 0.07, dur: 0.09 }, // E5
+        { freq: 783.99, time: 0.14, dur: 0.10 }, // G5
+        { freq: 987.77, time: 0.22, dur: 0.22 }, // B5
+      ];
+
+      for (let i = 0; i < notes.length; i++) {
+        const n = notes[i];
+        const noteStart = now + n.time;
+        const noteEnd = noteStart + n.dur;
+
+        const osc = this.ctx.createOscillator();
+        const gain = this.ctx.createGain();
+        osc.type = i === notes.length - 1 ? 'sine' : 'triangle';
+        osc.frequency.setValueAtTime(n.freq, noteStart);
+        osc.frequency.linearRampToValueAtTime(n.freq + 5, noteStart + n.dur * 0.5);
+        osc.frequency.linearRampToValueAtTime(n.freq, noteEnd);
+
+        gain.gain.setValueAtTime(0.0001, noteStart);
+        gain.gain.linearRampToValueAtTime(0.25, noteStart + 0.02);
+        gain.gain.exponentialRampToValueAtTime(0.0001, noteEnd);
+
+        osc.connect(gain);
+        gain.connect(this.masterGain);
+        osc.start(noteStart);
+        osc.stop(noteEnd);
+
+        osc.onended = () => {
+          try {
+            osc.disconnect();
+            gain.disconnect();
+          } catch {}
+        };
+      }
     } catch {
       // Ignore audio scheduling exceptions
     }

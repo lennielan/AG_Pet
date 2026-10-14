@@ -1,7 +1,7 @@
 /**
  * desktop-overlay/renderer/app.ts
  * Main renderer application orchestrating the PetEngine, drag handling,
- * context menu, activity status badge, and IPC communication.
+ * context menu, activity status badge, headpat interaction, break reminders, and IPC.
  */
 
 import { PetEngine } from '../../sprite-engine';
@@ -86,7 +86,15 @@ export class PetOverlayRendererApp {
   private isIgnoringMouse = true;
   private sleepTimer: any = null;
   private lastMoveCheckTime = 0;
-  private lastPersistentSummary = 'Idle';
+  private lastPersistentSummary = 'В ожидании';
+
+  // Headpat gesture tracking
+  private headpatSamples: Array<{ x: number; y: number; time: number }> = [];
+  private lastHeadpatTriggerTime = 0;
+
+  // 30-minute break reminder
+  private breakTimer: any = null;
+  private pendingBreakReminder = false;
 
   constructor(canvas: HTMLCanvasElement, initialConfig: Partial<PetConfig> = {}) {
     this.canvas = canvas;
@@ -175,8 +183,9 @@ export class PetOverlayRendererApp {
     const badgeEl = document.getElementById('status-badge');
     const dotEl = document.getElementById('status-dot');
     const textEl = document.getElementById('status-text');
+    const iconEl = document.getElementById('status-icon') as HTMLCanvasElement | null;
     if (badgeEl && dotEl && textEl) {
-      this.statusBadge.bindElements(badgeEl, dotEl, textEl);
+      this.statusBadge.bindElements(badgeEl, dotEl, textEl, iconEl);
     }
 
     const menuEl = document.getElementById('context-menu');
@@ -220,7 +229,7 @@ export class PetOverlayRendererApp {
     if (this.petEngine.getState() === 'sleeping') {
       this.updateState({
         state: 'idle',
-        summary: 'Idle',
+        summary: 'В ожидании',
         timestamp: Date.now(),
       });
     }
@@ -230,7 +239,7 @@ export class PetOverlayRendererApp {
       if (this.petEngine.getState() === 'idle') {
         this.updateState({
           state: 'sleeping',
-          summary: 'Zzz... Sleeping',
+          summary: 'Спит... Zzz',
           timestamp: Date.now(),
         });
       }
@@ -317,6 +326,13 @@ export class PetOverlayRendererApp {
           this.setIgnoreMouse(false);
           this.statusBadge.onMouseEnter();
           this.resetSleepTimer();
+
+          // Check if cursor is over Gravi's head region for petting
+          const fractionX = localX / this.canvas.width;
+          const fractionY = localY / this.canvas.height;
+          if (fractionY >= 0.05 && fractionY <= 0.45 && fractionX >= 0.20 && fractionX <= 0.80) {
+            this.trackHeadpatMovement(e.clientX, e.clientY);
+          }
         } else {
           this.setIgnoreMouse(true);
           this.statusBadge.onMouseLeave();
@@ -334,17 +350,153 @@ export class PetOverlayRendererApp {
     });
   }
 
+  private trackHeadpatMovement(cx: number, cy: number): void {
+    const now = Date.now();
+    this.headpatSamples.push({ x: cx, y: cy, time: now });
+
+    // Prune samples older than 900ms
+    this.headpatSamples = this.headpatSamples.filter((s) => now - s.time <= 900);
+
+    if (this.headpatSamples.length >= 4 && now - this.lastHeadpatTriggerTime >= 5000) {
+      let totalDistX = 0;
+      let reversals = 0;
+      let lastDir = 0;
+
+      for (let i = 1; i < this.headpatSamples.length; i++) {
+        const dx = this.headpatSamples[i].x - this.headpatSamples[i - 1].x;
+        totalDistX += Math.abs(dx);
+        if (Math.abs(dx) >= 3) {
+          const dir = Math.sign(dx);
+          if (lastDir !== 0 && dir !== lastDir) {
+            reversals++;
+          }
+          lastDir = dir;
+        }
+      }
+
+      if (totalDistX >= 130 && reversals >= 2) {
+        this.triggerHeadpat();
+        this.lastHeadpatTriggerTime = now;
+        this.headpatSamples = [];
+      }
+    }
+  }
+
+  public triggerHeadpat(): void {
+    this.resetSleepTimer();
+    this.petEngine.triggerHeadpat(2.0);
+    const audio = this.petEngine.getAudio();
+    if (audio) {
+      audio.playPreset('headpat');
+    }
+    const phrases = [
+      'Мур-р-р! Спасибо! ♥',
+      'Приятно! Погнали кодить дальше! ♥',
+      'Грави заряжен на 100%! ♥',
+      '*довольное мурчание* ♥',
+      'Ты лучший разработчик! ♥',
+      'Обожаю поглаживания! ♥',
+    ];
+    const phrase = phrases[Math.floor(Math.random() * phrases.length)];
+    this.statusBadge.showTemporary(phrase, 'heart', 3000);
+  }
+
   public start(): void {
     this.petEngine.start();
+    this.initBreakReminder();
+    this.initStartupGreeting();
     if (ipcRenderer) {
       ipcRenderer.send('pet_ready');
     }
+  }
+
+  private initBreakReminder(): void {
+    if (this.breakTimer) {
+      clearInterval(this.breakTimer);
+    }
+    // 30 minutes interval
+    this.breakTimer = setInterval(() => {
+      this.checkBreakReminder();
+    }, 30 * 60 * 1000);
+    if (typeof this.breakTimer?.unref === 'function') {
+      this.breakTimer.unref();
+    }
+  }
+
+  public checkBreakReminder(): void {
+    const currentState = this.petEngine.getState();
+    if (currentState === 'idle' || currentState === 'sleeping') {
+      this.triggerBreakReminder();
+    } else {
+      this.pendingBreakReminder = true;
+    }
+  }
+
+  public triggerBreakReminder(): void {
+    this.pendingBreakReminder = false;
+    this.resetSleepTimer();
+    this.petEngine.onClick();
+    const audio = this.petEngine.getAudio();
+    if (audio) {
+      audio.playPreset('ready');
+    }
+    const breakPhrases = [
+      'Пора размяться и выпить воды! ☕',
+      '30 минут прошло! Сделай паузу и потянись! 🧘',
+      'Глазам нужен отдых! Посмотри в окно 1 минуту 🌿',
+      'Время для чая или кофе! Ты отлично трудишься! ☕',
+    ];
+    const phrase = breakPhrases[Math.floor(Math.random() * breakPhrases.length)];
+    this.statusBadge.showTemporary(phrase, 'coffee', 8000);
+  }
+
+  private initStartupGreeting(): void {
+    setTimeout(() => {
+      this.triggerGreeting();
+    }, 600);
+  }
+
+  public triggerGreeting(): void {
+    const hour = new Date().getHours();
+    let greetings: string[];
+    if (hour >= 5 && hour < 12) {
+      greetings = [
+        'Доброе утро! Готов к новым задачам! ✨',
+        'Утренний кофе и чистый код! ☕',
+        'Привет! Начнем этот день продуктивно! 🚀',
+      ];
+    } else if (hour >= 12 && hour < 18) {
+      greetings = [
+        'Добрый день! Погнали кодить! 💻',
+        'Грави на связи! Чем займемся? ⚡',
+        'Привет! Готов разносить баги в пух и прах! 🔥',
+      ];
+    } else if (hour >= 18 && hour < 23) {
+      greetings = [
+        'Добрый вечер! Завершим все начатое! 🌟',
+        'Грави готов к вечернему код-сеансу! 🌙',
+        'Привет! Время закрывать задачи и коммитить! 🎯',
+      ];
+    } else {
+      greetings = [
+        'Доброй ночи! Ночные коммиты — самые душевные! 🌌',
+        'Не спится? Грави поможет дописать проект! 🌠',
+        'Привет, полуночник! Тихо пишем код... 🕯️',
+      ];
+    }
+    const phrase = greetings[Math.floor(Math.random() * greetings.length)];
+    this.petEngine.onClick();
+    this.statusBadge.showTemporary(phrase, 'star', 4500);
   }
 
   public stop(): void {
     if (this.sleepTimer) {
       clearTimeout(this.sleepTimer);
       this.sleepTimer = null;
+    }
+    if (this.breakTimer) {
+      clearInterval(this.breakTimer);
+      this.breakTimer = null;
     }
     this.petEngine.stop();
   }
@@ -376,9 +528,20 @@ export class PetOverlayRendererApp {
   }
 
   private handleTestState(state: AgentState): void {
+    const russianStateNames: Record<AgentState, string> = {
+      idle: 'Тест: Покой',
+      thinking: 'Тест: Размышление',
+      running: 'Тест: В работе',
+      ready: 'Тест: Готово',
+      needs_input: 'Тест: Ожидание ввода',
+      blocked: 'Тест: Ошибка',
+      dragging: 'Тест: Перемещение',
+      waving: 'Тест: Приветствие',
+      sleeping: 'Тест: Сон',
+    };
     this.updateState({
       state,
-      summary: `Manual test: ${state}`,
+      summary: russianStateNames[state] || `Тест: ${state}`,
       timestamp: Date.now(),
     });
   }
@@ -402,6 +565,18 @@ export class PetOverlayRendererApp {
       if (container) {
         container.style.display = 'flex';
       }
+      this.contextMenu.showPet();
+      this.setIgnoreMouse(true);
+      this.resetSleepTimer();
+      this.petEngine.onClick();
+    });
+
+    ipcRenderer.on('hide_pet', () => {
+      const container = document.getElementById('pet-container');
+      if (container) {
+        container.style.display = 'none';
+      }
+      this.contextMenu.hide();
     });
 
     ipcRenderer.on('close_context_menu', () => {
@@ -430,6 +605,9 @@ export class PetOverlayRendererApp {
     this.contextMenu.setActiveState(payload.state);
     if (payload.state !== 'sleeping') {
       this.resetSleepTimer();
+    }
+    if (payload.state === 'idle' && this.pendingBreakReminder) {
+      this.triggerBreakReminder();
     }
   }
 

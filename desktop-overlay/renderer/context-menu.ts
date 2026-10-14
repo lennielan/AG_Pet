@@ -368,7 +368,7 @@ export class ContextMenuController {
     // Update mute label & icon
     const muteLabel = this.menuElement.querySelector('#mute-label');
     if (muteLabel) {
-      muteLabel.textContent = this.config.isMuted ? 'Sound: OFF' : 'Sound: ON';
+      muteLabel.textContent = this.config.isMuted ? 'Звук: ВЫКЛ' : 'Звук: ВКЛ';
     }
     const muteIcon = this.menuElement.querySelector('#mute-icon');
     if (muteIcon) {

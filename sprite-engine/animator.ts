@@ -67,6 +67,20 @@ export class PetAnimator {
   private targetGlanceX = 0;
   private targetGlanceY = 0;
 
+  private headpatTimer = 0;
+
+  public triggerHeadpat(duration = 2.0): void {
+    if (this.headpatTimer > 0) return;
+    const dur = duration > 10 ? duration / 1000.0 : duration;
+    this.headpatTimer = Math.max(1.0, Math.min(dur, 3.0));
+    this.spawnHeartParticle(42, 12);
+    this.spawnHeartParticle(40, 14);
+  }
+
+  public isHeadpat(): boolean {
+    return this.headpatTimer > 0;
+  }
+
   public onSoundTrigger?: (preset: SoundPreset) => void;
   public onStateChange?: (state: AgentState) => void;
 
@@ -179,6 +193,10 @@ export class PetAnimator {
 
     this.updateParticles(clampedDt);
     this.updateMicroBehaviors(clampedDt);
+
+    if (this.headpatTimer > 0) {
+      this.headpatTimer = Math.max(0, this.headpatTimer - clampedDt);
+    }
 
     // Compute raw target rig pose according to active state choreography
     let targetRig: RigPose;
@@ -323,9 +341,27 @@ export class PetAnimator {
       lookY = this.targetGlanceY * arc;
     }
 
+    // Headpat blissful reaction
+    if (this.headpatTimer > 0) {
+      const patDy = torsoDy;
+      const patLeftHandDy = -1.5 + Math.sin(omega * t) * 0.8;
+      const patRightHandDy = -1.5 + Math.cos(omega * t) * 0.8;
+
+      return {
+        torso: createTransform(0, patDy, 0, torsoScaleX, torsoScaleY),
+        head: createTransform(0, patDy, 0, torsoScaleX, torsoScaleY),
+        leftHand: createTransform(leftHandDx, patLeftHandDy, 0, 1.0, 1.0),
+        rightHand: createTransform(rightHandDx, patRightHandDy, 0, 1.0, 1.0),
+        lookX: 0,
+        lookY: 0,
+        eyeScaleY: 1.0,
+        expression: 'headpat' as EyeExpression,
+      };
+    }
+
     return {
       torso: createTransform(0, torsoDy, torsoRot, torsoScaleX, torsoScaleY),
-      head: createTransform(0, headDy, headRot, 1.0, 1.0),
+      head: createTransform(0, torsoDy, torsoRot, torsoScaleX, torsoScaleY),
       leftHand: createTransform(leftHandDx, leftHandDy, leftHandRot, 1.0, 1.0),
       rightHand: createTransform(rightHandDx, rightHandDy, rightHandRot, 1.0, 1.0),
       lookX,
@@ -337,41 +373,36 @@ export class PetAnimator {
 
   /**
    * Choreography 2: RUNNING
-   * Energetic hover, focused head lean, darting code-reading eyes,
-   * alternating typing hands at 18 rad/s anti-phase.
+   * Lissajous Figure-8 hover with orbital floating hands and smooth pulse wave face.
    */
   private computeRunningTarget(dt: number): RigPose {
     const t = this.totalTime;
 
-    // Computational hover
-    const torsoDy = Math.sin(3.5 * t) * 1.2;
+    // 1. Torso: Lissajous Figure-8 hover
+    const torsoDx = Math.sin(2.4 * t) * 1.4;
+    const torsoDy = Math.sin(4.8 * t) * 1.6;
     const torsoRot = 0;
 
-    // Head tilted forward towards keyboard, scanning code
-    const headDy = torsoDy + 0.8;
-    const headDx = Math.sin(2.8 * t) * 0.8;
+    // 2. Head: Overlapping action following torso with phase lag (-0.45 rad)
+    const headDx = Math.sin(2.4 * t - 0.45) * 1.6;
+    const headDy = Math.sin(4.8 * t - 0.45) * 1.6;
     const headRot = 0;
 
-    // Hands swept inwards towards keyboard center with horizontal typing sweep
-    const leftSweep = Math.sin(5.5 * t) * 1.8 + Math.cos(3.2 * t) * 0.8;
-    const leftHandDx = 4.8 + leftSweep;
+    // 3. Floating hands: Orbital anti-phase ellipses alongside body (no overlap with torso)
+    const handOrbitSpeed = 6.5;
+    const leftHandDx = Math.cos(handOrbitSpeed * t) * 1.2 + torsoDx * 0.5;
+    const leftHandDy = Math.sin(handOrbitSpeed * t) * 2.4 + torsoDy * 0.5;
 
-    const rightSweep = Math.cos(6.0 * t) * 1.8 + Math.sin(3.7 * t) * 0.8;
-    const rightHandDx = -4.8 + rightSweep;
-
-    // Fast typing taps
-    const leftTap = Math.abs(Math.sin(16.0 * t)) * 2.8 - 2.2;
-    const rightTap = Math.abs(Math.cos(16.0 * t)) * 2.8 - 2.2;
-    const leftHandDy = leftTap;
-    const rightHandDy = rightTap;
+    const rightHandDx = -Math.cos(handOrbitSpeed * t) * 1.2 + torsoDx * 0.5;
+    const rightHandDy = Math.sin(handOrbitSpeed * t + Math.PI) * 2.4 + torsoDy * 0.5;
     const leftHandRot = 0;
     const rightHandRot = 0;
 
-    // Code-reading glance along terminal lines
-    const lookX = Math.sin(5.5 * t) * 2.5;
-    const lookY = 0.5;
+    // Glancing look
+    const lookX = Math.sin(2.4 * t) * 1.5;
+    const lookY = 0;
 
-    // Quadrupled ring particles
+    // Ring particles timer
     this.particleSpawnTimer += dt;
     if (this.particleSpawnTimer >= 0.15) {
       this.particleSpawnTimer = 0;
@@ -379,8 +410,8 @@ export class PetAnimator {
     }
 
     return {
-      torso: createTransform(0, torsoDy, torsoRot, 1.0, 1.0),
-      head: createTransform(headDx, headDy, headRot, 1.0, 1.0),
+      torso: createTransform(torsoDx, torsoDy, torsoRot, 1.0, 1.0),
+      head: createTransform(torsoDx, torsoDy, torsoRot, 1.0, 1.0),
       leftHand: createTransform(leftHandDx, leftHandDy, leftHandRot, 1.0, 1.0),
       rightHand: createTransform(rightHandDx, rightHandDy, rightHandRot, 1.0, 1.0),
       lookX,
@@ -409,7 +440,7 @@ export class PetAnimator {
 
     return {
       torso: createTransform(0, torsoDy, 0, 1.0, 1.0),
-      head: createTransform(0, headDy, 0, 1.0, 1.0),
+      head: createTransform(0, torsoDy, 0, 1.0, 1.0),
       leftHand: createTransform(0, leftHandDy, 0, 1.0, 1.0),
       rightHand: createTransform(0, rightHandDy, 0, 1.0, 1.0),
       lookX: 1.5, // Looking up and right questioningly
@@ -491,7 +522,7 @@ export class PetAnimator {
 
     return {
       torso: createTransform(0, torsoDy, 0, torsoScaleX, torsoScaleY),
-      head: createTransform(0, headDy, headRot, 1.0, 1.0),
+      head: createTransform(0, torsoDy, 0, torsoScaleX, torsoScaleY),
       leftHand: createTransform(0, leftHandDy, leftHandRot, 1.0, 1.0),
       rightHand: createTransform(0, rightHandDy, rightHandRot, 1.0, 1.0),
       lookX: 0,
@@ -523,7 +554,7 @@ export class PetAnimator {
 
     return {
       torso: createTransform(shudder, torsoDy, 0, 1.02, 0.98),
-      head: createTransform(shudder * 1.2, headDy, 0, 1.0, 1.0),
+      head: createTransform(shudder, torsoDy, 0, 1.02, 0.98),
       leftHand: createTransform(0, leftHandDy, 0, 1.0, 1.0),
       rightHand: createTransform(0, rightHandDy, 0, 1.0, 1.0),
       lookX: 0,
@@ -565,7 +596,7 @@ export class PetAnimator {
 
     return {
       torso: createTransform(0, 0, tilt, torsoScaleX, torsoScaleY),
-      head: createTransform(0, 0, headRot, 1.0, 1.0),
+      head: createTransform(0, 0, tilt, torsoScaleX, torsoScaleY),
       leftHand: createTransform(handDx, handDy, tilt, 1.0, 1.0),
       rightHand: createTransform(handDx, handDy, tilt, 1.0, 1.0),
       lookX: 0,
@@ -613,7 +644,7 @@ export class PetAnimator {
 
     return {
       torso: createTransform(0, bob, 0, 1.0, 1.0),
-      head: createTransform(0, headDy, headRot, 1.0, 1.0),
+      head: createTransform(0, bob, 0, 1.0, 1.0),
       leftHand: createTransform(0, bob, 0, 1.0, 1.0),
       rightHand: createTransform(rightHandDx, rightHandDy, rightHandRot, 1.0, 1.0),
       lookX: 0,
@@ -640,7 +671,7 @@ export class PetAnimator {
 
     return {
       torso: createTransform(0, bob, 0, 1.0, 1.0),
-      head: createTransform(0, headDy, 0, 1.0, 1.0),
+      head: createTransform(0, bob, 0, 1.0, 1.0),
       leftHand: createTransform(0, bob + 0.6, 0, 1.0, 1.0),
       rightHand: createTransform(0, bob + 0.6, 0, 1.0, 1.0),
       lookX: 0,
@@ -668,7 +699,7 @@ export class PetAnimator {
 
     return {
       torso: createTransform(0, torsoDy, 0, 1.0, 1.0),
-      head: createTransform(0, headDy, 0, 1.0, 1.0),
+      head: createTransform(0, torsoDy, 0, 1.0, 1.0),
       leftHand: createTransform(0, leftHandDy, 0, 1.0, 1.0),
       rightHand: createTransform(0, rightHandDy, 0, 1.0, 1.0),
       lookX,
@@ -729,8 +760,8 @@ export class PetAnimator {
         this.particles.splice(i, 1);
         continue;
       }
-      p.x = Math.max(0, Math.min(64, p.x + p.vx * dt));
-      p.y = Math.max(0, Math.min(64, p.y + p.vy * dt));
+      p.x += p.vx * dt;
+      p.y += p.vy * dt;
     }
   }
 
@@ -795,6 +826,20 @@ export class PetAnimator {
       color: '#7DD3FC',
       size: isBig ? 6 : 4,
       text: isBig ? 'Z' : 'z',
+    });
+  }
+
+  private spawnHeartParticle(startX = 42, startY = 12): void {
+    this.particles.push({
+      x: startX + (Math.random() - 0.5) * 6,
+      y: startY,
+      vx: (Math.random() - 0.5) * 2 + 1.0,
+      vy: -8.0 - Math.random() * 2,
+      life: 1.4,
+      maxLife: 1.4,
+      color: '#FB7185',
+      size: 5,
+      text: '♥',
     });
   }
 }

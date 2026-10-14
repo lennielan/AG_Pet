@@ -1,5 +1,5 @@
 <!DOCTYPE html>
-<html lang="en">
+<html lang="ru">
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
@@ -12,19 +12,20 @@
     <div id="drag-region" class="drag-region">
       <!-- Interactive Status Badge (Activity Tooltip) -->
       <div id="status-badge" class="status-badge">
-        <span id="status-dot" class="status-dot"></span>
-        <span id="status-text" class="status-text">Idle</span>
+        <canvas id="status-icon" class="status-icon" width="10" height="10"></canvas>
+        <span id="status-dot" class="status-dot" style="display: none;"></span>
+        <span id="status-text" class="status-text">В ожидании</span>
       </div>
       <canvas id="pet-canvas" width="64" height="64"></canvas>
     </div>
 
     <!-- Modern Glassmorphism HUD Context Menu -->
     <div id="context-menu" class="context-menu hidden">
-      <div class="hud-header">GRAVI HUD</div>
+      <div class="hud-header">ПАНЕЛЬ ГРАВИ</div>
 
       <!-- Segmented Scale Control -->
       <div class="hud-section">
-        <div class="hud-section-label">SCALE</div>
+        <div class="hud-section-label">МАСШТАБ</div>
         <div class="segmented-control" id="scale-submenu">
           <button type="button" class="segment-btn submenu-item active" data-scale="1.0" id="scale-opt-10">
             <span class="check-mark" id="check-10">✔</span>1.0x
@@ -40,28 +41,28 @@
 
       <!-- Test State 2x3 Grid Chips -->
       <div class="hud-section">
-        <div class="hud-section-label">TEST STATE</div>
+        <div class="hud-section-label">ТЕСТ СОСТОЯНИЙ</div>
         <div class="state-chips-grid" id="test-state-submenu">
           <button type="button" class="state-chip submenu-item" data-state="idle" id="state-opt-idle">
-            <span class="state-dot dot-idle">●</span>Idle
+            <span class="state-dot dot-idle">●</span>Покой
           </button>
           <button type="button" class="state-chip submenu-item" data-state="thinking" id="state-opt-thinking">
-            <span class="state-dot dot-thinking">●</span>Think
+            <span class="state-dot dot-thinking">●</span>Мысли
           </button>
           <button type="button" class="state-chip submenu-item" data-state="running" id="state-opt-running">
-            <span class="state-dot dot-running">●</span>Running
+            <span class="state-dot dot-running">●</span>Работа
           </button>
           <button type="button" class="state-chip submenu-item" data-state="ready" id="state-opt-ready">
-            <span class="state-dot dot-ready">●</span>Ready
+            <span class="state-dot dot-ready">●</span>Готово
           </button>
           <button type="button" class="state-chip submenu-item" data-state="needs_input" id="state-opt-needs-input">
-            <span class="state-dot dot-input">●</span>Input
+            <span class="state-dot dot-input">●</span>Ввод
           </button>
           <button type="button" class="state-chip submenu-item" data-state="blocked" id="state-opt-blocked">
-            <span class="state-dot dot-blocked">●</span>Blocked
+            <span class="state-dot dot-blocked">●</span>Ошибка
           </button>
           <button type="button" class="state-chip submenu-item" data-state="sleeping" id="state-opt-sleep">
-            <span class="state-dot dot-sleep">●</span>Sleep
+            <span class="state-dot dot-sleep">●</span>Сон
           </button>
         </div>
       </div>
@@ -72,11 +73,11 @@
       <div class="hud-actions">
         <button type="button" class="hud-action-btn" id="menu-mute">
           <span class="hud-action-icon" id="mute-icon">🔊</span>
-          <span id="mute-label">Sound: ON</span>
+          <span id="mute-label">Звук: ВКЛ</span>
         </button>
         <button type="button" class="hud-action-btn hud-action-danger" id="menu-hide">
           <span class="hud-action-icon">✕</span>
-          <span>Hide Pet</span>
+          <span>Скрыть (Ctrl+Shift+G)</span>
         </button>
       </div>
     </div>

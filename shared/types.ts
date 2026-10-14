@@ -32,7 +32,8 @@ export type SoundPreset =
   | 'needs_input'
   | 'blocked'
   | 'drag'
-  | 'state_change';
+  | 'state_change'
+  | 'headpat';
 
 /**
  * Metadata accompanying state updates from the transcript parser.
@@ -139,7 +140,8 @@ export type EyeExpression =
   | 'dragging'
   | 'sleeping'
   | 'thinking'
-  | 'blink';
+  | 'blink'
+  | 'headpat';
 
 /**
  * 4-part anatomical skeletal rig pose with procedural eye orientation.
