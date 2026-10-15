@@ -360,3 +360,232 @@ html, body {
   color: #00F0FF;
   margin-right: 1px;
 }
+
+/* ==========================================================================
+   Tactile Dynamic Bottom Dock (Obsidian Anti-AI Design & Spring Motion)
+   ========================================================================== */
+
+/* Invisible hover bridge between pet bottom and dock */
+.dock-hover-bridge {
+  position: absolute;
+  top: calc(50% + var(--pet-bottom, 35px) - 8px);
+  left: 50%;
+  transform: translateX(-50%);
+  width: 110px;
+  height: calc(var(--dock-top, 43px) - var(--pet-bottom, 35px) + 20px);
+  pointer-events: auto;
+  z-index: 40;
+}
+
+/* Master Dock Container */
+.bottom-dock {
+  position: absolute;
+  top: calc(50% + var(--dock-top, 43px));
+  left: 50%;
+  transform: translateX(-50%) scaleX(var(--line-scale, 1));
+  transform-origin: top center;
+  background: #0B0D14;
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  box-shadow: 0 4px 16px rgba(0, 0, 0, 0.6), 0 1px 3px rgba(0, 0, 0, 0.8);
+  pointer-events: auto;
+  overflow: hidden;
+  z-index: 45;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  box-sizing: border-box;
+  transition: width 0.22s cubic-bezier(0.22, 1, 0.36, 1),
+              height 0.22s cubic-bezier(0.22, 1, 0.36, 1),
+              border-radius 0.22s cubic-bezier(0.22, 1, 0.36, 1),
+              background 0.18s ease,
+              border-color 0.18s ease,
+              box-shadow 0.22s ease,
+              transform 0.12s ease-out;
+}
+
+/* Phase 0: Anchor Line */
+.bottom-dock.state-line {
+  width: 28px;
+  height: 6px;
+  border-radius: 3px;
+  cursor: pointer;
+}
+
+.bottom-dock.state-line .dock-write-btn,
+.bottom-dock.state-line .dock-composer {
+  opacity: 0;
+  pointer-events: none;
+  display: none;
+}
+
+/* Phase 1: Hover State (Write Button) */
+.bottom-dock.state-hover {
+  width: 46px;
+  height: 34px;
+  border-radius: 17px;
+  background: #141722;
+  border-color: rgba(255, 255, 255, 0.16);
+  cursor: pointer;
+  transform: translateX(-50%) scale(1);
+}
+
+.bottom-dock.state-hover .dock-write-btn {
+  display: flex;
+  opacity: 1;
+  pointer-events: auto;
+  animation: dockIconPop 0.2s cubic-bezier(0.22, 1, 0.36, 1) forwards;
+}
+
+.bottom-dock.state-hover .dock-composer {
+  display: none;
+  opacity: 0;
+  pointer-events: none;
+}
+
+/* Phase 2: Expanded State (Quick Input Bar) */
+.bottom-dock.state-expanded {
+  width: 268px;
+  height: 36px;
+  border-radius: 18px;
+  background: #12151F;
+  border-color: rgba(255, 255, 255, 0.28);
+  box-shadow: 0 6px 20px rgba(0, 0, 0, 0.75), 0 0 0 1px rgba(255, 255, 255, 0.08);
+  transform: translateX(-50%) scale(1);
+  padding: 0 6px 0 12px;
+}
+
+.bottom-dock.state-expanded .dock-write-btn {
+  display: none;
+  opacity: 0;
+  pointer-events: none;
+}
+
+.bottom-dock.state-expanded .dock-composer {
+  display: flex;
+  opacity: 1;
+  pointer-events: auto;
+  width: 100%;
+  height: 100%;
+  align-items: center;
+}
+
+/* Phase 3: Sending Pulse */
+.bottom-dock.state-sending {
+  transform: translateX(-50%) scale(0.94) !important;
+  transition: transform 0.11s ease-out !important;
+}
+
+/* Write Button Inner */
+.dock-write-btn {
+  width: 100%;
+  height: 100%;
+  background: transparent;
+  border: none;
+  color: #E2E8F0;
+  display: none;
+  align-items: center;
+  justify-content: center;
+  padding: 0;
+  cursor: pointer;
+  outline: none;
+  transition: color 0.15s ease, transform 0.15s ease;
+}
+
+.dock-write-btn:hover {
+  color: #FFFFFF;
+  transform: scale(1.08);
+}
+
+.dock-icon-pen {
+  display: block;
+}
+
+@keyframes dockIconPop {
+  0% {
+    opacity: 0;
+    transform: translateY(3px) scale(0.85);
+  }
+  100% {
+    opacity: 1;
+    transform: translateY(0) scale(1);
+  }
+}
+
+/* Composer Layout */
+.dock-composer {
+  display: none;
+  align-items: center;
+  gap: 8px;
+  width: 100%;
+  height: 100%;
+}
+
+.dock-prefix-icon {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: #64748B;
+  flex-shrink: 0;
+}
+
+.dock-input {
+  flex: 1;
+  background: transparent;
+  border: none;
+  outline: none;
+  color: #F8FAFC;
+  font-family: 'Consolas', 'Segoe UI', Tahoma, monospace;
+  font-size: 11px;
+  font-weight: 500;
+  line-height: 1;
+  padding: 0;
+  margin: 0;
+  min-width: 0;
+}
+
+.dock-input::placeholder {
+  color: #64748B;
+  font-size: 11px;
+}
+
+/* Send Button */
+.dock-send-btn {
+  width: 24px;
+  height: 24px;
+  min-width: 24px;
+  min-height: 24px;
+  border-radius: 12px;
+  background: #1A1F2C;
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  color: #64748B;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 0;
+  outline: none;
+  transition: background 0.15s ease, color 0.15s ease, border-color 0.15s ease, transform 0.1s ease;
+}
+
+.dock-send-btn.has-text {
+  background: #252B3B;
+  border-color: rgba(255, 255, 255, 0.25);
+  color: #F8FAFC;
+}
+
+.dock-send-btn.has-text:hover {
+  background: #323A4E;
+  color: #FFFFFF;
+}
+
+.dock-send-btn:active {
+  transform: scale(0.92);
+}
+
+.dock-send-key {
+  font-size: 12px;
+  font-weight: 700;
+  line-height: 1;
+  display: inline-block;
+  user-select: none;
+}

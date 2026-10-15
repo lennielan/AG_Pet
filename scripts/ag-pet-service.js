@@ -50,7 +50,7 @@ if (process.platform === 'win32') {
         { encoding: 'utf8', timeout: 3000 }
       ).trim();
       log(`Supervisor running on desktop: ${desk}`);
-      if (desk.toLowerCase().includes('exebox')) {
+      if (desk.toLowerCase().includes('exebox') && !process.env.AG_PET_FORCE_SERVICE && !process.argv.includes('--force')) {
         log(`Refusing to run on isolated runner desktop (${desk}). Exiting so interactive desktop can bind.`);
         process.exit(0);
       }
@@ -76,6 +76,7 @@ lockServer.listen(LOCK_PORT, '127.0.0.1', () => {
 
 let activeOverlayProcess = null;
 let currentAgPid = null;
+let dismissedForAgPid = null;
 
 function findRootAntigravityPid() {
   if (process.platform !== 'win32') {
@@ -84,27 +85,38 @@ function findRootAntigravityPid() {
 
   for (const exeName of ['Antigravity.exe', 'Antigravity IDE.exe']) {
     try {
-      const out = child_process.execSync(`tasklist /FI "IMAGENAME eq ${exeName}" /FO CSV /NH`, {
+      const out = child_process.execSync(`tasklist /V /FI "IMAGENAME eq ${exeName}" /FO CSV /NH`, {
         encoding: 'utf8',
         stdio: ['ignore', 'pipe', 'ignore'],
         windowsHide: true,
-        timeout: 1500,
+        timeout: 2000,
       });
       const lines = out.split('\n');
       for (const line of lines) {
-        const parts = line.split(',');
-        if (parts.length >= 2) {
-          const namePart = parts[0].replace(/["']/g, '').trim().toLowerCase();
-          if (namePart.includes('antigravity')) {
-            const pid = parseInt(parts[1].replace(/["']/g, '').trim(), 10);
-            if (Number.isFinite(pid) && pid > 0) {
-              return pid;
-            }
+        if (!line.includes(exeName)) continue;
+        const parts = line.split('","').map((p) => p.replace(/"/g, '').trim());
+        if (parts.length >= 9) {
+          const pid = parseInt(parts[1], 10);
+          const title = parts[8];
+          if (Number.isFinite(pid) && pid > 0 && title && title !== 'N/A' && title !== 'OleMainThreadWndName') {
+            return pid;
           }
         }
       }
     } catch (_e) {}
   }
+
+  try {
+    const psCmd = `powershell -NoProfile -NonInteractive -Command "$p = Get-Process -Name 'Antigravity','Antigravity IDE' -ErrorAction SilentlyContinue | Where-Object { $_.MainWindowHandle -ne 0 } | Select-Object -First 1; if ($p) { $p.Id }"`;
+    const out = child_process.execSync(psCmd, {
+      encoding: 'utf8',
+      stdio: ['ignore', 'pipe', 'ignore'],
+      windowsHide: true,
+      timeout: 2000,
+    }).trim();
+    const pid = parseInt(out, 10);
+    if (Number.isFinite(pid) && pid > 0) return pid;
+  } catch (_e) {}
 
   return null;
 }
@@ -155,6 +167,13 @@ function spawnOverlay(agPid) {
       if (activeOverlayProcess === child) {
         activeOverlayProcess = null;
       }
+      // If Antigravity is still running with an active window, but the pet was closed,
+      // it means the user closed the pet intentionally (Task Manager or Tray Exit).
+      // Mark it as dismissed for this Antigravity session so we don't respawn it in a loop!
+      if (currentAgPid && isPidAlive(currentAgPid)) {
+        log(`Pet was dismissed/killed while Antigravity (${currentAgPid}) is still active. Suppressing respawn.`);
+        dismissedForAgPid = currentAgPid;
+      }
     });
 
     child.on('error', (err) => {
@@ -173,10 +192,16 @@ function spawnOverlay(agPid) {
 }
 
 function killOverlay() {
-  if (activeOverlayProcess && !activeOverlayProcess.killed) {
-    log(`Terminating overlay process PID ${activeOverlayProcess.pid}`);
+  if (activeOverlayProcess) {
+    const pid = activeOverlayProcess.pid;
+    log(`Terminating overlay process PID ${pid}`);
     try {
       activeOverlayProcess.kill('SIGTERM');
+      if (process.platform === 'win32' && pid) {
+        try {
+          child_process.execSync(`taskkill /PID ${pid} /T /F`, { stdio: 'ignore', windowsHide: true });
+        } catch (_e) {}
+      }
       setTimeout(() => {
         if (activeOverlayProcess && !activeOverlayProcess.killed) {
           try {
@@ -190,39 +215,110 @@ function killOverlay() {
   currentAgPid = null;
 }
 
+let lastWindowCheckTime = 0;
+let isCheckingWindowAsync = false;
+let checkTimer = null;
+
+function checkWindowVisibleAsync(pid, callback) {
+  if (process.platform !== 'win32') {
+    return callback(true);
+  }
+  const psCmd = `powershell -NoProfile -NonInteractive -Command "$p = Get-Process -Id ${pid} -ErrorAction SilentlyContinue; if ($p -and $p.MainWindowHandle -ne 0) { 'VIS' }"`;
+  child_process.exec(psCmd, { windowsHide: true, timeout: 3000 }, (err, stdout) => {
+    if (err) {
+      return callback(isPidAlive(pid));
+    }
+    const isVis = stdout && stdout.includes('VIS');
+    callback(Boolean(isVis));
+  });
+}
+
+function scheduleNextCheck(delayMs) {
+  if (checkTimer) {
+    clearTimeout(checkTimer);
+  }
+  checkTimer = setTimeout(checkCycle, delayMs);
+}
+
 function checkCycle() {
   try {
+    const now = Date.now();
+
+    // 1. Antigravity PID is already known
+    if (currentAgPid) {
+      const alive = isPidAlive(currentAgPid);
+      if (!alive) {
+        log(`Antigravity PID ${currentAgPid} exited (detected via isPidAlive). Stopping overlay.`);
+        currentAgPid = null;
+        dismissedForAgPid = null;
+        if (isOverlayProcessRunning() || activeOverlayProcess) {
+          killOverlay();
+        }
+        scheduleNextCheck(4000);
+        return;
+      }
+
+      // Check window visibility at most once every 10 seconds asynchronously
+      if (now - lastWindowCheckTime >= 10000 && !isCheckingWindowAsync) {
+        lastWindowCheckTime = now;
+        isCheckingWindowAsync = true;
+        checkWindowVisibleAsync(currentAgPid, (hasVisibleWindow) => {
+          isCheckingWindowAsync = false;
+          if (!hasVisibleWindow) {
+            log(`Antigravity PID ${currentAgPid} main window closed. Terminating overlay.`);
+            dismissedForAgPid = null;
+            killOverlay();
+            currentAgPid = null;
+          }
+        });
+      }
+
+      // Verify overlay is still running (if user didn't dismiss it)
+      if (currentAgPid !== dismissedForAgPid) {
+        if (!isOverlayProcessRunning()) {
+          log(`Overlay died while Antigravity (${currentAgPid}) is active. Relaunching pet...`);
+          spawnOverlay(currentAgPid);
+        }
+      }
+
+      scheduleNextCheck(2000);
+      return;
+    }
+
+    // 2. Antigravity PID not known: search for root Antigravity process
     const agPid = findRootAntigravityPid();
 
     if (agPid) {
-      // Antigravity is running
-      if (!isOverlayProcessRunning()) {
-        log(`Antigravity detected (PID ${agPid}), launching pet...`);
-        spawnOverlay(agPid);
-      } else if (currentAgPid && currentAgPid !== agPid) {
-        log(`Antigravity PID changed from ${currentAgPid} to ${agPid}, restarting overlay...`);
-        killOverlay();
-        spawnOverlay(agPid);
+      currentAgPid = agPid;
+      lastWindowCheckTime = now;
+      if (agPid !== dismissedForAgPid) {
+        if (!isOverlayProcessRunning()) {
+          log(`Antigravity detected (PID ${agPid}), launching pet...`);
+          spawnOverlay(agPid);
+        }
       }
+      scheduleNextCheck(2000);
     } else {
-      // Antigravity is NOT running
+      dismissedForAgPid = null;
       if (isOverlayProcessRunning() || activeOverlayProcess) {
         log('Antigravity closed, stopping pet overlay...');
         killOverlay();
       }
+      scheduleNextCheck(4000);
     }
   } catch (err) {
     log(`Supervisor check cycle error: ${err.message}`);
+    scheduleNextCheck(4000);
   }
 }
 
 function startSupervisor() {
   log('Starting AG Pet background supervisor loop...');
-  setInterval(checkCycle, 1500);
   checkCycle();
 }
 
 process.on('SIGINT', () => {
+  if (checkTimer) clearTimeout(checkTimer);
   log('Service received SIGINT, stopping overlay and exiting...');
   killOverlay();
   try { lockServer.close(); } catch (_e) {}
@@ -230,6 +326,7 @@ process.on('SIGINT', () => {
 });
 
 process.on('SIGTERM', () => {
+  if (checkTimer) clearTimeout(checkTimer);
   log('Service received SIGTERM, stopping overlay and exiting...');
   killOverlay();
   try { lockServer.close(); } catch (_e) {}

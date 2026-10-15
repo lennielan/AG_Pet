@@ -1,0 +1,20 @@
+{
+  "files.watcherExclude": {
+    "**/.git/**": true,
+    "**/node_modules/**": true,
+    "**/dist/**": true,
+    "**/*.log": true,
+    "**/*.png": true
+  },
+  "search.exclude": {
+    "**/node_modules": true,
+    "**/dist": true,
+    "**/*.log": true,
+    "assets/**": true
+  },
+  "files.exclude": {
+    "**/.git": true,
+    "**/*.log": false
+  },
+  "typescript.tsserver.maxTsServerMemory": 512
+}

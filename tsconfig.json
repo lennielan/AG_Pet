@@ -14,5 +14,12 @@
   "include": [
     "shared/**/*",
     "sprite-engine/**/*"
+  ],
+  "exclude": [
+    "node_modules",
+    "dist",
+    "**/dist",
+    "tests",
+    "scripts"
   ]
 }

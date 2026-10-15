@@ -60,13 +60,13 @@ export class AntigravityExtension {
    */
   private setupEventPipes(): void {
     // 1. Transcript lines -> State Machine -> WebSocket Bridge
-    this.watcher.on('line', (line: string) => {
-      const payload = this.stateMachine.processLine(line);
+    this.watcher.on('line', (line: string, filePath?: string) => {
+      const payload = this.stateMachine.processLine(line, filePath);
       if (payload) {
         this.bridge.broadcast(payload);
         if (payload.state === 'needs_input' || payload.state === 'blocked' || payload.state === 'ready') {
           this.watcher.cancelInactivityTimer();
-        } else if (payload.state === 'running') {
+        } else if (payload.state === 'running' || payload.state === 'thinking') {
           this.watcher.recordActivity(payload.summary);
         }
       } else {

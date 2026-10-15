@@ -96,6 +96,22 @@ export class PetOverlayRendererApp {
   private breakTimer: any = null;
   private pendingBreakReminder = false;
 
+  // State hysteresis and anti-flicker gate
+  private lastStateChangeTime = 0;
+  private pendingStateTimer: any = null;
+  private pendingPayload: StatePayload | null = null;
+  private workingToThinkingTimer: any = null;
+
+  // Interactive Dynamic Bottom Dock
+  private dockState: 'line' | 'hover' | 'expanded' = 'line';
+  private dockCollapseTimer: any = null;
+  private dockElement: HTMLElement | null = null;
+  private dockWriteBtn: HTMLButtonElement | null = null;
+  private dockComposer: HTMLElement | null = null;
+  private dockInput: HTMLInputElement | null = null;
+  private dockSendBtn: HTMLButtonElement | null = null;
+  private dockBridge: HTMLElement | null = null;
+
   constructor(canvas: HTMLCanvasElement, initialConfig: Partial<PetConfig> = {}) {
     this.canvas = canvas;
     this.config = {
@@ -121,6 +137,12 @@ export class PetOverlayRendererApp {
       scale: this.config.scale,
       muted: this.config.isMuted,
       volume: 0.3,
+      onFrame: (pose) => {
+        if (this.dockElement && this.dockState === 'line') {
+          const scale = 1.0 - pose.bobY * 0.03;
+          this.dockElement.style.setProperty('--line-scale', scale.toFixed(3));
+        }
+      },
       onStateChange: (state) => {
         this.statusBadge.updateState(state, this.lastPersistentSummary);
         this.contextMenu.setActiveState(state);
@@ -207,8 +229,171 @@ export class PetOverlayRendererApp {
     }
 
     this.setupClickThroughListener();
+    this.initDockDom();
     this.resetSleepTimer();
     this.setupIpcListeners();
+  }
+
+  public updateCanvasDimensionsCss(): void {
+    if (typeof document === 'undefined') return;
+    const pixelDimension = Math.round(64 * 2.0 * this.config.scale);
+    const petBottomFromCenter = Math.round(pixelDimension * (70 / 256));
+    const dockSpacing = Math.round(8 * this.config.scale);
+    const dockTopOffset = petBottomFromCenter + dockSpacing;
+
+    document.documentElement.style.setProperty('--canvas-size', `${pixelDimension}px`);
+    document.documentElement.style.setProperty('--canvas-half-size', `${pixelDimension / 2}px`);
+    document.documentElement.style.setProperty('--pet-bottom', `${petBottomFromCenter}px`);
+    document.documentElement.style.setProperty('--dock-top', `${dockTopOffset}px`);
+  }
+
+  private initDockDom(): void {
+    this.dockElement = document.getElementById('bottom-dock');
+    this.dockWriteBtn = document.getElementById('dock-write-btn') as HTMLButtonElement | null;
+    this.dockComposer = document.getElementById('dock-composer');
+    this.dockInput = document.getElementById('dock-input') as HTMLInputElement | null;
+    this.dockSendBtn = document.getElementById('dock-send-btn') as HTMLButtonElement | null;
+    this.dockBridge = document.getElementById('dock-hover-bridge');
+
+    this.updateCanvasDimensionsCss();
+
+    if (this.dockWriteBtn) {
+      this.dockWriteBtn.addEventListener('click', (e) => {
+        e.stopPropagation();
+        this.expandDock();
+      });
+    }
+
+    if (this.dockInput) {
+      this.dockInput.addEventListener('input', () => {
+        const val = this.dockInput?.value || '';
+        const progress = Math.min(1, val.length / 28);
+        this.petEngine.setComposingState(true, progress);
+        if (val.trim().length > 0) {
+          this.dockSendBtn?.classList.add('has-text');
+        } else {
+          this.dockSendBtn?.classList.remove('has-text');
+        }
+      });
+
+      this.dockInput.addEventListener('keydown', (e: KeyboardEvent) => {
+        if (e.key === 'Enter') {
+          e.preventDefault();
+          this.submitDockMessage();
+        } else if (e.key === 'Escape') {
+          e.preventDefault();
+          this.collapseDock();
+        }
+      });
+    }
+
+    if (this.dockSendBtn) {
+      this.dockSendBtn.addEventListener('click', (e) => {
+        e.stopPropagation();
+        this.submitDockMessage();
+      });
+    }
+
+    window.addEventListener('mousedown', (e: MouseEvent) => {
+      if (this.dockState === 'expanded' && this.dockElement) {
+        if (!this.dockElement.contains(e.target as Node)) {
+          this.collapseDock();
+        }
+      }
+    });
+  }
+
+  public setDockState(state: 'line' | 'hover' | 'expanded'): void {
+    this.dockState = state;
+    if (this.dockElement) {
+      this.dockElement.classList.remove('state-line', 'state-hover', 'state-expanded');
+      this.dockElement.classList.add(`state-${state}`);
+    }
+  }
+
+  public expandDock(): void {
+    if (this.dockState === 'expanded') return;
+    if (this.dockCollapseTimer) {
+      clearTimeout(this.dockCollapseTimer);
+      this.dockCollapseTimer = null;
+    }
+    if (ipcRenderer) {
+      ipcRenderer.send('ag-pet:prepare-compose');
+    }
+    this.setDockState('expanded');
+    this.petEngine.setComposingState(true, 0);
+    this.setIgnoreMouse(false);
+    this.resetSleepTimer();
+
+    setTimeout(() => {
+      if (this.dockInput) {
+        this.dockInput.focus();
+      }
+    }, 40);
+
+    if (ipcRenderer) {
+      ipcRenderer.send('ag-pet:focus-window');
+    }
+  }
+
+  public collapseDock(): void {
+    if (this.dockCollapseTimer) {
+      clearTimeout(this.dockCollapseTimer);
+      this.dockCollapseTimer = null;
+    }
+    this.setDockState('line');
+    this.petEngine.setComposingState(false, 0);
+    if (this.dockInput) {
+      this.dockInput.value = '';
+      this.dockInput.blur();
+    }
+    if (this.dockSendBtn) {
+      this.dockSendBtn.classList.remove('has-text');
+    }
+    this.setIgnoreMouse(true);
+  }
+
+  public submitDockMessage(): void {
+    const text = this.dockInput?.value.trim() || '';
+    if (!text) return;
+
+    if (this.dockElement) {
+      this.dockElement.classList.add('state-sending');
+    }
+
+    if (ipcRenderer) {
+      ipcRenderer.send('ag-pet:send-chat-message', text);
+    }
+
+    this.statusBadge.showTemporary('Отправляю в чат...', 'terminal', 2500);
+    this.updateState({
+      state: 'running',
+      summary: 'В работе...',
+      timestamp: Date.now(),
+    });
+
+    const audio = this.petEngine.getAudio();
+    if (audio) {
+      audio.playPreset('state_change');
+    }
+
+    if (this.dockInput) {
+      this.dockInput.value = '';
+    }
+    if (this.dockSendBtn) {
+      this.dockSendBtn.classList.remove('has-text');
+    }
+
+    setTimeout(() => {
+      if (this.dockElement) {
+        this.dockElement.classList.remove('state-sending');
+      }
+      this.collapseDock();
+    }, 110);
+  }
+
+  public getDockState(): 'line' | 'hover' | 'expanded' {
+    return this.dockState;
   }
 
   public setIgnoreMouse(ignore: boolean): void {
@@ -249,7 +434,7 @@ export class PetOverlayRendererApp {
   private setupClickThroughListener(): void {
     window.addEventListener('mousemove', (e: MouseEvent) => {
       const now = performance.now();
-      if (now - this.lastMoveCheckTime < 16) return;
+      if (now - this.lastMoveCheckTime < 35) return;
       this.lastMoveCheckTime = now;
 
       // If context menu is open, check whether cursor is within menu bounds
@@ -277,6 +462,54 @@ export class PetOverlayRendererApp {
         return;
       }
 
+      // If dock is actively expanded, keep interaction active
+      if (this.dockState === 'expanded') {
+        this.setIgnoreMouse(false);
+        this.resetSleepTimer();
+        return;
+      }
+
+      // Check if mouse is within bottom dock or hover bridge bounds (with ±6px tolerance)
+      let isOverDockOrBridge = false;
+      if (this.dockElement) {
+        const dRect = this.dockElement.getBoundingClientRect();
+        if (
+          e.clientX >= dRect.left - 6 &&
+          e.clientX <= dRect.right + 6 &&
+          e.clientY >= dRect.top - 6 &&
+          e.clientY <= dRect.bottom + 6
+        ) {
+          isOverDockOrBridge = true;
+        }
+      }
+      if (!isOverDockOrBridge && this.dockBridge) {
+        const bRect = this.dockBridge.getBoundingClientRect();
+        if (
+          e.clientX >= bRect.left &&
+          e.clientX <= bRect.right &&
+          e.clientY >= bRect.top &&
+          e.clientY <= bRect.bottom
+        ) {
+          isOverDockOrBridge = true;
+        }
+      }
+
+      if (isOverDockOrBridge) {
+        if (this.dockCollapseTimer) {
+          clearTimeout(this.dockCollapseTimer);
+          this.dockCollapseTimer = null;
+        }
+        this.setIgnoreMouse(false);
+        this.resetSleepTimer();
+        if (this.dockState === 'line') {
+          this.setDockState('hover');
+          if (ipcRenderer) {
+            ipcRenderer.send('ag-pet:prepare-compose');
+          }
+        }
+        return;
+      }
+
       // Check canvas bounding box
       const cRect = this.canvas.getBoundingClientRect();
       if (
@@ -285,6 +518,14 @@ export class PetOverlayRendererApp {
         e.clientY < cRect.top ||
         e.clientY > cRect.bottom
       ) {
+        if (this.dockState === 'hover' && !this.dockCollapseTimer) {
+          this.dockCollapseTimer = setTimeout(() => {
+            this.dockCollapseTimer = null;
+            if (this.dockState === 'hover') {
+              this.setDockState('line');
+            }
+          }, 180);
+        }
         this.setIgnoreMouse(true);
         this.statusBadge.onMouseLeave();
         return;
@@ -312,38 +553,60 @@ export class PetOverlayRendererApp {
         return;
       }
 
-      try {
-        const imgData = ctx.getImageData(startX, startY, w, h);
-        let hasOpaquePixel = false;
-        for (let i = 3; i < imgData.data.length; i += 4) {
-          if (imgData.data[i] > 25) {
-            hasOpaquePixel = true;
-            break;
-          }
-        }
+      const fractionX = localX / this.canvas.width;
+      const fractionY = localY / this.canvas.height;
 
-        if (hasOpaquePixel) {
-          this.setIgnoreMouse(false);
-          this.statusBadge.onMouseEnter();
-          this.resetSleepTimer();
-
-          // Check if cursor is over Gravi's head region for petting
-          const fractionX = localX / this.canvas.width;
-          const fractionY = localY / this.canvas.height;
-          if (fractionY >= 0.05 && fractionY <= 0.45 && fractionX >= 0.20 && fractionX <= 0.80) {
-            this.trackHeadpatMovement(e.clientX, e.clientY);
+      let hasOpaquePixel = false;
+      // Fast rejection: if outside the sprite bounds, don't readback pixels from GPU
+      if (fractionX >= 0.12 && fractionX <= 0.88 && fractionY >= 0.05 && fractionY <= 0.95) {
+        try {
+          const imgData = ctx.getImageData(startX, startY, w, h);
+          for (let i = 3; i < imgData.data.length; i += 4) {
+            if (imgData.data[i] > 25) {
+              hasOpaquePixel = true;
+              break;
+            }
           }
-        } else {
-          this.setIgnoreMouse(true);
-          this.statusBadge.onMouseLeave();
+        } catch (_e) {
+          hasOpaquePixel = false;
         }
-      } catch (_e) {
+      }
+
+      if (hasOpaquePixel) {
+        if (this.dockCollapseTimer) {
+          clearTimeout(this.dockCollapseTimer);
+          this.dockCollapseTimer = null;
+        }
+        if (this.dockState === 'line') {
+          this.setDockState('hover');
+        }
         this.setIgnoreMouse(false);
+        this.statusBadge.onMouseEnter();
+        this.resetSleepTimer();
+
+        // Check if cursor is over Gravi's head region for petting
+        if (fractionY >= 0.05 && fractionY <= 0.45 && fractionX >= 0.20 && fractionX <= 0.80) {
+          this.trackHeadpatMovement(e.clientX, e.clientY);
+        }
+      } else {
+        if (this.dockState === 'hover' && !this.dockCollapseTimer) {
+          this.dockCollapseTimer = setTimeout(() => {
+            this.dockCollapseTimer = null;
+            if (this.dockState === 'hover') {
+              this.setDockState('line');
+            }
+          }, 180);
+        }
+        this.setIgnoreMouse(true);
+        this.statusBadge.onMouseLeave();
       }
     });
 
     window.addEventListener('mouseleave', () => {
-      if (!this.contextMenu.isVisible() && !this.dragController.isDragging()) {
+      if (!this.contextMenu.isVisible() && !this.dragController.isDragging() && this.dockState !== 'expanded') {
+        if (this.dockState === 'hover') {
+          this.setDockState('line');
+        }
         this.setIgnoreMouse(true);
         this.statusBadge.onMouseLeave();
       }
@@ -498,12 +761,22 @@ export class PetOverlayRendererApp {
       clearInterval(this.breakTimer);
       this.breakTimer = null;
     }
+    if (this.workingToThinkingTimer) {
+      clearTimeout(this.workingToThinkingTimer);
+      this.workingToThinkingTimer = null;
+    }
+    if (this.pendingStateTimer) {
+      clearTimeout(this.pendingStateTimer);
+      this.pendingStateTimer = null;
+      this.pendingPayload = null;
+    }
     this.petEngine.stop();
   }
 
   private handleScaleChange(scale: PetScale): void {
     this.config.scale = scale;
     this.petEngine.setScale(scale);
+    this.updateCanvasDimensionsCss();
     if (ipcRenderer) {
       ipcRenderer.send('set_scale', scale);
     }
@@ -588,6 +861,7 @@ export class PetOverlayRendererApp {
       this.config = { ...this.config, ...updates };
       if (updates.scale) {
         this.petEngine.setScale(updates.scale);
+        this.updateCanvasDimensionsCss();
       }
       if (typeof updates.isMuted === 'boolean') {
         this.petEngine.setMuted(updates.isMuted);
@@ -596,12 +870,99 @@ export class PetOverlayRendererApp {
     });
   }
 
-  public updateState(payload: StatePayload): void {
+  public updateState(rawPayload: StatePayload): void {
+    const payload: StatePayload = { ...rawPayload, metadata: { ...rawPayload.metadata } };
+
+    // Explicit conversion of metadata.thinking / thinking summaries into state 'thinking'
+    if (
+      payload.metadata?.thinking === true ||
+      payload.summary?.toLowerCase().includes('thinking') ||
+      payload.summary?.startsWith('Думаю')
+    ) {
+      payload.state = 'thinking';
+      if (!payload.summary || payload.summary.toLowerCase().includes('thinking') || payload.summary.startsWith('Думаю')) {
+        payload.summary = 'Думаю 1с...';
+      }
+    }
+
+    // Cancel working-to-thinking timer if state is not running
+    if (payload.state !== 'running') {
+      if (this.workingToThinkingTimer) {
+        clearTimeout(this.workingToThinkingTimer);
+        this.workingToThinkingTimer = null;
+      }
+    }
+
+    // If incoming state is running, blocked, needs_input, or ready, cancel any pending hysteresis transition
+    if (
+      payload.state === 'running' ||
+      payload.state === 'blocked' ||
+      payload.state === 'needs_input' ||
+      payload.state === 'ready'
+    ) {
+      if (this.pendingStateTimer) {
+        clearTimeout(this.pendingStateTimer);
+        this.pendingStateTimer = null;
+        this.pendingPayload = null;
+      }
+    }
+
+    this.applyState(payload);
+  }
+
+  private applyState(payload: StatePayload): void {
+    if (this.pendingStateTimer) {
+      clearTimeout(this.pendingStateTimer);
+      this.pendingStateTimer = null;
+      this.pendingPayload = null;
+    }
+
+    if (this.workingToThinkingTimer) {
+      clearTimeout(this.workingToThinkingTimer);
+      this.workingToThinkingTimer = null;
+    }
+
+    if (payload.state === 'running') {
+      const isUserInput =
+        payload.metadata?.type === 'USER_INPUT' ||
+        payload.metadata?.role === 'user' ||
+        payload.summary?.includes('В работе...') ||
+        payload.summary?.includes('Processing request');
+      const delay = isUserInput ? 1200 : 1800;
+
+      this.workingToThinkingTimer = setTimeout(() => {
+        this.workingToThinkingTimer = null;
+        if (this.petEngine.getState() === 'running') {
+          this.applyState({
+            state: 'thinking',
+            summary: 'Думаю 1с...',
+            timestamp: Date.now(),
+            metadata: { thinking: true, autoThinking: true },
+          });
+        }
+      }, delay);
+      if (typeof this.workingToThinkingTimer?.unref === 'function') {
+        this.workingToThinkingTimer.unref();
+      }
+    }
+
+    const prevState = this.petEngine.getState();
+    if (prevState !== payload.state) {
+      this.lastStateChangeTime = Date.now();
+    }
+
     if (payload.state !== 'dragging' && payload.state !== 'waving') {
       this.lastPersistentSummary = payload.summary;
     }
-    this.petEngine.setState(payload.state, true);
-    this.statusBadge.updateState(payload.state, payload.summary);
+
+    if (payload.state === 'thinking') {
+      this.petEngine.setState('thinking', false);
+      this.statusBadge.updateState('thinking', 'Думаю 1с...');
+    } else {
+      this.petEngine.setState(payload.state, true);
+      this.statusBadge.updateState(payload.state, payload.summary);
+    }
+
     this.contextMenu.setActiveState(payload.state);
     if (payload.state !== 'sleeping') {
       this.resetSleepTimer();

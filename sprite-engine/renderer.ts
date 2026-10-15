@@ -45,12 +45,15 @@ export class PetRenderer {
     leftHandUp: { x: 62, y: 108 },
   };
 
+  public onFrame?: (pose: AnimationPose) => void;
+
   constructor(
     displayCanvas: HTMLCanvasElement,
-    options: RendererOptions & { animator?: PetAnimator } = {}
+    options: RendererOptions & { animator?: PetAnimator; onFrame?: (pose: AnimationPose) => void } = {}
   ) {
     this.displayCanvas = displayCanvas;
     this.animator = options.animator;
+    this.onFrame = options.onFrame;
     this.scale = options.scale ?? 1.0;
     if (options.baseMultiplier !== undefined) {
       this.baseMultiplier = options.baseMultiplier;
@@ -205,12 +208,29 @@ export class PetRenderer {
 
     const loop = (timestamp: number) => {
       if (!this.isRunning) return;
-      const dt = Math.min((timestamp - this.lastTime) / 1000.0, 0.100);
+
+      const state = this.animator ? this.animator.getState() : 'idle';
+      const isQuietState = state === 'idle' || state === 'sleeping';
+
+      // Adaptive FPS: 30 FPS (interval >= 32ms) for idle/sleeping, 60 FPS for active states
+      const minInterval = isQuietState ? 32 : 0;
+      const elapsed = timestamp - this.lastTime;
+      if (minInterval > 0 && elapsed < minInterval) {
+        if (typeof requestAnimationFrame === 'function') {
+          this.animFrameId = requestAnimationFrame(loop);
+        }
+        return;
+      }
+
+      const dt = Math.min(elapsed / 1000.0, 0.100);
       this.lastTime = timestamp;
 
       if (this.animator) {
         const pose = this.animator.update(dt);
         this.render(pose);
+        if (this.onFrame) {
+          this.onFrame(pose);
+        }
       }
 
       if (typeof requestAnimationFrame === 'function') {

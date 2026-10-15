@@ -53,10 +53,7 @@ export function loadPetConfig(customPath?: string): PetConfig {
         ? (parsed.scale as PetScale)
         : DEFAULT_CONFIG.scale,
       isMuted: typeof parsed.isMuted === 'boolean' ? parsed.isMuted : DEFAULT_CONFIG.isMuted,
-      parentPid:
-        typeof parsed.parentPid === 'number' && parsed.parentPid > 0
-          ? parsed.parentPid
-          : undefined,
+      parentPid: undefined, // Ephemeral runtime PID: strictly not loaded from persistent config
       wsPort:
         typeof parsed.wsPort === 'number' && parsed.wsPort >= 1024 && parsed.wsPort <= 65535
           ? parsed.wsPort
@@ -95,7 +92,8 @@ export function savePetConfig(
       fs.mkdirSync(dir, { recursive: true });
     }
 
-    const payload = JSON.stringify(config, null, 2);
+    const { parentPid: _ignored, ...persistedConfig } = config;
+    const payload = JSON.stringify(persistedConfig, null, 2);
     fs.writeFileSync(filePath, payload, 'utf8');
     return { success: true };
   } catch (err: any) {

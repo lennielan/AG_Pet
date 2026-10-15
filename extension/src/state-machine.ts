@@ -124,18 +124,40 @@ export function parseTranscriptLine(line: string | null | undefined): ParseResul
     };
   }
 
-  // 5. Thinking / reasoning / user prompt (thinking state)
+  // 5. Tool result / function response (agent completed tool execution and switches to thinking)
+  const hasFunctionResponse = Array.isArray(obj.parts) && obj.parts.some((p: any) => p && (p.functionResponse || p.tool_result));
+  const isToolResult =
+    obj.type === 'TOOL_RESULT' ||
+    obj.type === 'FUNCTION_RESPONSE' ||
+    obj.role === 'tool' ||
+    Boolean(obj.tool_result) ||
+    Boolean(obj.functionResponse) ||
+    hasFunctionResponse;
+
+  if (isToolResult) {
+    return {
+      state: 'thinking',
+      summary: 'Думаю...',
+      timestamp,
+      metadata: {
+        thinking: true,
+        toolResult: true,
+        role: obj.role,
+        type: obj.type,
+      },
+    };
+  }
+
+  // 6. Thinking / reasoning (Strictly real thought/thinking content)
   const hasThoughtPart = Array.isArray(obj.parts) && obj.parts.some((p: any) => p && p.thought);
-  const isThinking =
+  const isExplicitThinking =
     Boolean(obj.thinking) ||
     Boolean(obj.thought) ||
     obj.type === 'THOUGHT' ||
-    hasThoughtPart ||
-    (obj.type === 'PLANNER_RESPONSE' && !obj.turn_complete && (!obj.tool_calls || obj.tool_calls.length === 0)) ||
-    obj.type === 'USER_INPUT' ||
-    obj.role === 'user';
+    obj.type === 'THINKING' ||
+    hasThoughtPart;
 
-  if (isThinking) {
+  if (isExplicitThinking) {
     const summary = typeof obj.thinking === 'object' && obj.thinking?.text
       ? 'Thinking...'
       : (typeof obj.summary === 'string' ? obj.summary : 'Thinking...');
@@ -151,8 +173,25 @@ export function parseTranscriptLine(line: string | null | undefined): ParseResul
     };
   }
 
-  // 6. Model in-progress response streaming / tool execution
-  if ((obj.role === 'model' && (obj.content || obj.parts)) || (obj.type === 'GENERIC' && obj.status === 'DONE')) {
+  // 7. User input / Request start (running state)
+  if (obj.type === 'USER_INPUT' || obj.role === 'user') {
+    return {
+      state: 'running',
+      summary: obj.summary || 'Processing request...',
+      timestamp,
+      metadata: {
+        role: obj.role || 'user',
+        type: obj.type || 'USER_INPUT',
+      },
+    };
+  }
+
+  // 8. Model in-progress response streaming / tool execution
+  if (
+    (obj.role === 'model' && (obj.content || obj.parts)) ||
+    (obj.type === 'GENERIC' && obj.status === 'DONE') ||
+    (obj.type === 'PLANNER_RESPONSE' && !obj.turn_complete)
+  ) {
     return {
       state: 'running',
       summary: obj.summary || 'Executing task...',
@@ -168,6 +207,14 @@ export function parseTranscriptLine(line: string | null | undefined): ParseResul
   return null;
 }
 
+export interface SessionContext {
+  state: AgentState;
+  summary: string;
+  lastUpdated: number;
+  metadata?: StateMetadata;
+  lastToolCallTime?: number;
+}
+
 /**
  * Stateful Agent State Machine.
  * Tracks lifecycle transitions, keeps history, and emits transition events.
@@ -179,8 +226,9 @@ export class AgentStateMachine extends EventEmitter {
   private readonly maxHistorySize: number;
   private readyAutoReturnTimer: NodeJS.Timeout | null = null;
   private readyDebounceTimer: NodeJS.Timeout | null = null;
-  private thinkingTransitionTimer: NodeJS.Timeout | null = null;
+  private workingToThinkingTimer: NodeJS.Timeout | null = null;
   private hasCelebratedTurn: boolean = false;
+  private sessions: Map<string, SessionContext> = new Map();
 
   constructor(options: StateMachineOptions = {}) {
     super();
@@ -195,10 +243,11 @@ export class AgentStateMachine extends EventEmitter {
   }
 
   /**
-   * Parses and processes a transcript line.
-   * If a state update is extracted, transitions the state machine.
+   * Parses and processes a transcript line with multi-session awareness.
+   * If a state update is extracted, transitions the state machine according
+   * to global priority resolution across all active sessions.
    */
-  public processLine(line: string | null | undefined): StatePayload | null {
+  public processLine(line: string | null | undefined, sessionId: string = 'default'): StatePayload | null {
     const result = parseTranscriptLine(line);
     if (!result) {
       return null;
@@ -215,17 +264,116 @@ export class AgentStateMachine extends EventEmitter {
       return null;
     }
 
-    // Debounce ready if arriving while actively running or thinking to prevent hop-spam during multi-step tasks
-    if (payload.state === 'ready' && (this.currentState === 'running' || this.currentState === 'thinking')) {
+    const now = Date.now();
+    let session = this.sessions.get(sessionId);
+    if (!session) {
+      session = {
+        state: 'idle',
+        summary: 'AG Pet ready',
+        lastUpdated: now,
+      };
+      this.sessions.set(sessionId, session);
+    }
+
+    // Track active tool call timestamp for /btw and sub-turn quick response protection
+    if (payload.state === 'running' && payload.metadata?.toolName) {
+      session.lastToolCallTime = now;
+    }
+
+    // Update this session's context
+    session.state = payload.state;
+    session.summary = payload.summary;
+    session.lastUpdated = now;
+    session.metadata = payload.metadata;
+
+    // Single-session default mode (for backward compatibility and synchronous unit tests)
+    if (sessionId === 'default' || (this.sessions.size <= 1 && this.sessions.has('default'))) {
+      if (this.readyDebounceTimer) {
+        clearTimeout(this.readyDebounceTimer);
+        this.readyDebounceTimer = null;
+      }
+
+      this.transitionTo(payload.state, payload.summary, payload.metadata);
+      return this.currentPayload;
+    }
+
+    // Multi-session resolution mode:
+    // Find all active sessions modified within the last 25 seconds
+    const activeSessions: Array<{ id: string; session: SessionContext }> = [];
+    for (const [id, sess] of this.sessions.entries()) {
+      const isBusy = sess.state === 'running' || sess.state === 'thinking' || sess.state === 'needs_input' || sess.state === 'blocked';
+      if (isBusy && (now - sess.lastUpdated < 25000)) {
+        activeSessions.push({ id, session: sess });
+      }
+    }
+
+    // Global Priority Resolution:
+    // 1. Blocked
+    // 2. Needs input
+    // 3. Running (any session running keeps pet in running)
+    // 4. Thinking
+    // 5. Ready (only when no session is running/thinking) -> else idle
+    let targetState: AgentState = 'idle';
+    let targetSummary = payload.summary;
+    let targetMetadata = payload.metadata;
+
+    const blockedSession = activeSessions.find(s => s.session.state === 'blocked');
+    const inputSession = activeSessions.find(s => s.session.state === 'needs_input');
+    const runningSession = activeSessions.find(s => s.session.state === 'running');
+    const thinkingSession = activeSessions.find(s => s.session.state === 'thinking');
+
+    if (blockedSession) {
+      targetState = 'blocked';
+      targetSummary = blockedSession.session.summary;
+      targetMetadata = blockedSession.session.metadata;
+    } else if (inputSession) {
+      targetState = 'needs_input';
+      targetSummary = inputSession.session.summary;
+      targetMetadata = inputSession.session.metadata;
+    } else if (runningSession) {
+      targetState = 'running';
+      const recentRunning = activeSessions
+        .filter(s => s.session.state === 'running')
+        .sort((a, b) => b.session.lastUpdated - a.session.lastUpdated)[0];
+      targetSummary = recentRunning ? recentRunning.session.summary : runningSession.session.summary;
+      targetMetadata = recentRunning ? recentRunning.session.metadata : runningSession.session.metadata;
+    } else if (thinkingSession) {
+      targetState = 'thinking';
+      targetSummary = thinkingSession.session.summary;
+      targetMetadata = thinkingSession.session.metadata;
+    } else {
+      if (payload.state === 'ready') {
+        targetState = 'ready';
+        targetSummary = payload.summary;
+        targetMetadata = payload.metadata;
+      } else {
+        targetState = 'idle';
+        targetSummary = 'AG Pet ready';
+      }
+    }
+
+    let finalSummary = targetSummary;
+    if (activeSessions.length > 1 && sessionId !== 'default') {
+      finalSummary = `[${activeSessions.length} чата] ${targetSummary}`;
+    }
+
+    // Protection against premature ready during rapid sub-turns / /btw:
+    // If a turn_complete arrives within 1.5s of an active tool call, debounce ready
+    if (targetState === 'ready' && session.lastToolCallTime && (now - session.lastToolCallTime < 1500)) {
+      if (this.workingToThinkingTimer) {
+        clearTimeout(this.workingToThinkingTimer);
+        this.workingToThinkingTimer = null;
+      }
+      const remainingDelay = 1500 - (now - session.lastToolCallTime);
       if (this.readyDebounceTimer) {
         clearTimeout(this.readyDebounceTimer);
       }
       this.readyDebounceTimer = setTimeout(() => {
         this.readyDebounceTimer = null;
         if (this.currentState === 'running' || this.currentState === 'thinking') {
-          this.transitionTo(payload.state, payload.summary, payload.metadata);
+          this.transitionTo('ready', finalSummary, targetMetadata);
         }
-      }, 3000);
+      }, remainingDelay);
       if (typeof this.readyDebounceTimer.unref === 'function') {
         this.readyDebounceTimer.unref();
       }
@@ -237,7 +385,7 @@ export class AgentStateMachine extends EventEmitter {
       this.readyDebounceTimer = null;
     }
 
-    this.transitionTo(payload.state, payload.summary, payload.metadata);
+    this.transitionTo(targetState, finalSummary, targetMetadata);
     return this.currentPayload;
   }
 
@@ -258,9 +406,9 @@ export class AgentStateMachine extends EventEmitter {
       this.readyAutoReturnTimer = null;
     }
 
-    if (this.thinkingTransitionTimer) {
-      clearTimeout(this.thinkingTransitionTimer);
-      this.thinkingTransitionTimer = null;
+    if (this.workingToThinkingTimer) {
+      clearTimeout(this.workingToThinkingTimer);
+      this.workingToThinkingTimer = null;
     }
 
     if (nextState === 'running') {
@@ -270,15 +418,29 @@ export class AgentStateMachine extends EventEmitter {
         this.readyDebounceTimer = null;
       }
 
-      // Automatically transition from running to thinking after 1.8s of no new tool calls
-      this.thinkingTransitionTimer = setTimeout(() => {
-        this.thinkingTransitionTimer = null;
+      // Schedule transition from Working (1.2s) / tool execution (1.8s) to Thinking
+      const isUserInput =
+        metadata?.type === 'USER_INPUT' ||
+        metadata?.role === 'user' ||
+        summary?.includes('Processing request') ||
+        summary?.includes('В работе...');
+      const delay = isUserInput ? 1200 : 1800;
+
+      this.workingToThinkingTimer = setTimeout(() => {
+        this.workingToThinkingTimer = null;
         if (this.currentState === 'running') {
-          this.transitionTo('thinking', 'Thinking...');
+          for (const sess of this.sessions.values()) {
+            if (sess.state === 'running') {
+              sess.state = 'thinking';
+              sess.summary = 'Думаю...';
+              sess.lastUpdated = Date.now();
+            }
+          }
+          this.transitionTo('thinking', 'Думаю...', { autoThinking: true, thinking: true });
         }
-      }, 1800);
-      if (typeof this.thinkingTransitionTimer.unref === 'function') {
-        this.thinkingTransitionTimer.unref();
+      }, delay);
+      if (typeof this.workingToThinkingTimer?.unref === 'function') {
+        this.workingToThinkingTimer.unref();
       }
     }
 
@@ -348,11 +510,12 @@ export class AgentStateMachine extends EventEmitter {
       clearTimeout(this.readyDebounceTimer);
       this.readyDebounceTimer = null;
     }
-    if (this.thinkingTransitionTimer) {
-      clearTimeout(this.thinkingTransitionTimer);
-      this.thinkingTransitionTimer = null;
+    if (this.workingToThinkingTimer) {
+      clearTimeout(this.workingToThinkingTimer);
+      this.workingToThinkingTimer = null;
     }
     this.hasCelebratedTurn = false;
+    this.sessions.clear();
     this.currentState = initialState;
     this.currentPayload = {
       state: initialState,
@@ -361,5 +524,9 @@ export class AgentStateMachine extends EventEmitter {
     };
     this.history = [{ ...this.currentPayload }];
     this.emit('reset', this.currentPayload);
+  }
+
+  public getSessions(): Map<string, SessionContext> {
+    return new Map(this.sessions);
   }
 }

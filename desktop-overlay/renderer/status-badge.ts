@@ -40,6 +40,9 @@ export function formatDisplaySummary(raw: string): { text: string; icon: string 
   }
 
   // Standard Antigravity placeholders translations
+  if (/^thinking(\.{0,3})?$/i.test(s) || s.toLowerCase().startsWith('thinking')) {
+    return { text: 'Думаю...', icon: 'think' };
+  }
   if (/^executing task\.{0,3}$/i.test(s) || /^running command\.{0,3}$/i.test(s) || /^running\.{0,3}$/i.test(s)) {
     return { text: 'Выполняю команду...', icon: 'terminal' };
   }

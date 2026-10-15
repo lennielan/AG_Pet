@@ -227,4 +227,5 @@ export interface PetEngineOptions {
   volume?: number;
   audioContext?: AudioContext | any;
   onStateChange?: (state: AgentState) => void;
+  onFrame?: (pose: AnimationPose) => void;
 }

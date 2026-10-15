@@ -19,6 +19,32 @@
       <canvas id="pet-canvas" width="64" height="64"></canvas>
     </div>
 
+    <!-- Invisible hover bridge between pet and dock -->
+    <div id="dock-hover-bridge" class="dock-hover-bridge"></div>
+
+    <!-- Interactive Dynamic Bottom Dock -->
+    <div id="bottom-dock" class="bottom-dock state-line">
+      <!-- Hover Mode: Write Button -->
+      <button type="button" id="dock-write-btn" class="dock-write-btn" aria-label="Написать">
+        <svg class="dock-icon-pen" viewBox="0 0 16 16" width="14" height="14" fill="currentColor">
+          <path d="M12.146.146a.5.5 0 0 1 .708 0l3 3a.5.5 0 0 1 0 .708l-9.5 9.5a.5.5 0 0 1-.168.11l-5 2a.5.5 0 0 1-.65-.65l2-5a.5.5 0 0 1 .11-.168l9.5-9.5zM11.207 2.5 13.5 4.793 14.793 3.5 12.5 1.207 11.207 2.5zm1.586 3L10.5 3.207 4 9.707V10h.5a.5.5 0 0 1 .5.5v.5h.5a.5.5 0 0 1 .5.5v.5h.293l6.5-6.5zm-9.761 5.175-.806 2.015 2.015-.806-1.209-1.209z"/>
+        </svg>
+      </button>
+
+      <!-- Expanded Mode: Input Composer -->
+      <div id="dock-composer" class="dock-composer">
+        <div class="dock-prefix-icon">
+          <svg viewBox="0 0 16 16" width="13" height="13" fill="currentColor">
+            <path d="M12.146.146a.5.5 0 0 1 .708 0l3 3a.5.5 0 0 1 0 .708l-9.5 9.5a.5.5 0 0 1-.168.11l-5 2a.5.5 0 0 1-.65-.65l2-5a.5.5 0 0 1 .11-.168l9.5-9.5zM11.207 2.5 13.5 4.793 14.793 3.5 12.5 1.207 11.207 2.5z"/>
+          </svg>
+        </div>
+        <input type="text" id="dock-input" class="dock-input" placeholder="Быстрый запрос агенту..." autocomplete="off" spellcheck="false" maxlength="280">
+        <button type="button" id="dock-send-btn" class="dock-send-btn" aria-label="Отправить">
+          <span class="dock-send-key">↵</span>
+        </button>
+      </div>
+    </div>
+
     <!-- Modern Glassmorphism HUD Context Menu -->
     <div id="context-menu" class="context-menu hidden">
       <div class="hud-header">ПАНЕЛЬ ГРАВИ</div>

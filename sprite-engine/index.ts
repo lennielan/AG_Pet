@@ -31,6 +31,7 @@ export class PetEngine {
   private isRunning = false;
   private suppressAudio = false;
   private onStateChangeCallback?: (state: AgentState) => void;
+  private lastStateSoundTime = 0;
 
   constructor(canvas: HTMLCanvasElement, options: PetEngineOptions = {}) {
     this.canvas = canvas;
@@ -41,6 +42,7 @@ export class PetEngine {
     this.renderer = new PetRenderer(this.canvas, {
       scale: this.scale,
       animator: this.animator,
+      onFrame: options.onFrame,
     });
     this.audio = new SoundSynthesizer({
       muted: options.muted ?? DEFAULT_IS_MUTED,
@@ -49,9 +51,17 @@ export class PetEngine {
       maxHistory: 100,
     });
 
-    // Wire animator sound triggers to synthesizer
+    // Wire animator sound triggers to synthesizer with 2.5s anti-spam cooldown for state transitions
     this.animator.onSoundTrigger = (preset: SoundPreset) => {
       if (!this.suppressAudio) {
+        const statePresets: SoundPreset[] = ['state_change', 'ready', 'needs_input', 'blocked'];
+        const now = Date.now();
+        if (statePresets.includes(preset)) {
+          if (now - this.lastStateSoundTime < 2500) {
+            return;
+          }
+          this.lastStateSoundTime = now;
+        }
         this.audio.playPreset(preset);
       }
     };
@@ -166,6 +176,14 @@ export class PetEngine {
 
   public setDragVelocity(vx: number, vy: number): void {
     this.animator.setDragVelocity(vx, vy);
+  }
+
+  public setComposingState(isComposing: boolean, progress = 0): void {
+    this.animator.setComposingState(isComposing, progress);
+  }
+
+  public getComposingState(): { isComposing: boolean; progress: number } {
+    return this.animator.getComposingState();
   }
 
   public getRenderer(): PetRenderer {

@@ -69,6 +69,19 @@ export class PetAnimator {
 
   private headpatTimer = 0;
 
+  // Gaze tracking for interactive composing dock
+  private isComposing = false;
+  private composeLookProgress = 0;
+
+  public setComposingState(isComposing: boolean, progress = 0): void {
+    this.isComposing = isComposing;
+    this.composeLookProgress = Math.max(0, Math.min(1, progress));
+  }
+
+  public getComposingState(): { isComposing: boolean; progress: number } {
+    return { isComposing: this.isComposing, progress: this.composeLookProgress };
+  }
+
   public triggerHeadpat(duration = 2.0): void {
     if (this.headpatTimer > 0) return;
     const dur = duration > 10 ? duration / 1000.0 : duration;
@@ -235,6 +248,12 @@ export class PetAnimator {
       default:
         targetRig = this.computeIdleTarget(clampedDt);
         break;
+    }
+
+    // If user is actively composing in bottom dock, focus eyes down and follow typing progress
+    if (this.isComposing) {
+      targetRig.lookY = 1.8;
+      targetRig.lookX = -2.2 + this.composeLookProgress * 4.4;
     }
 
     // Exponential Decay Lerp Blending

@@ -16,6 +16,19 @@ import { PIDWatchdog } from './pid-watchdog';
 import { ClientBridge } from './client-bridge';
 import { focusParentWindow } from './window-focus';
 
+function truncateLogFileIfNeeded(filePath: string) {
+  try {
+    if (fs.existsSync(filePath)) {
+      const stats = fs.statSync(filePath);
+      if (stats.size > 100 * 1024) {
+        fs.writeFileSync(filePath, `[${new Date().toISOString()}] Log truncated on startup (was ${stats.size} bytes)\n`);
+      }
+    }
+  } catch (_e) {}
+}
+truncateLogFileIfNeeded('d:/Projects/AG_Pet/overlay-debug.log');
+truncateLogFileIfNeeded('C:/Users/lennielan/AppData/Roaming/ag-pet/overlay-debug.log');
+
 function logDebug(msg: string) {
   const line = `[${new Date().toISOString()}] ${msg}\n`;
   try {
@@ -93,6 +106,13 @@ const Tray = electronModule?.Tray;
 const Menu = electronModule?.Menu;
 const nativeImage = electronModule?.nativeImage;
 const globalShortcut = electronModule?.globalShortcut;
+
+if (app && app.commandLine) {
+  app.commandLine.appendSwitch('js-flags', '--max-old-space-size=64');
+  app.commandLine.appendSwitch('disable-http-cache');
+  app.commandLine.appendSwitch('disable-GPU-shader-disk-cache');
+  app.commandLine.appendSwitch('renderer-process-limit', '1');
+}
 
 logDebug(`TOP LEVEL LOAD: require.main === module is ${require.main === module}, app exists: ${Boolean(app)}`);
 
@@ -175,8 +195,52 @@ function loadTranscriptModules() {
 export function calculateWindowDimensions(scale: PetScale): { width: number; height: number } {
   const canvasSize = Math.round(64 * 2.0 * scale);
   const width = Math.max(320, canvasSize + 120);
-  const height = Math.max(340, canvasSize + 120);
+  const height = Math.max(360, canvasSize + 140);
   return { width, height };
+}
+
+/**
+ * Detects the active Antigravity root process with an open visible window.
+ */
+export function findAntigravityWindowPid(): number | null {
+  if (process.platform !== 'win32') return null;
+
+  for (const exeName of ['Antigravity.exe', 'Antigravity IDE.exe']) {
+    try {
+      const out = child_process.execSync(`tasklist /V /FI "IMAGENAME eq ${exeName}" /FO CSV /NH`, {
+        encoding: 'utf8',
+        stdio: ['ignore', 'pipe', 'ignore'],
+        windowsHide: true,
+        timeout: 2000,
+      });
+      const lines = out.split('\n');
+      for (const line of lines) {
+        if (!line.includes(exeName)) continue;
+        const parts = line.split('","').map((p) => p.replace(/"/g, '').trim());
+        if (parts.length >= 9) {
+          const pid = parseInt(parts[1], 10);
+          const title = parts[8];
+          if (Number.isFinite(pid) && pid > 0 && title && title !== 'N/A' && title !== 'OleMainThreadWndName') {
+            return pid;
+          }
+        }
+      }
+    } catch (_e) {}
+  }
+
+  try {
+    const psCmd = `powershell -NoProfile -NonInteractive -Command "$p = Get-Process -Name 'Antigravity','Antigravity IDE' -ErrorAction SilentlyContinue | Where-Object { $_.MainWindowHandle -ne 0 } | Select-Object -First 1; if ($p) { $p.Id }"`;
+    const out = child_process.execSync(psCmd, {
+      encoding: 'utf8',
+      stdio: ['ignore', 'pipe', 'ignore'],
+      windowsHide: true,
+      timeout: 2000,
+    }).trim();
+    const pid = parseInt(out, 10);
+    if (Number.isFinite(pid) && pid > 0) return pid;
+  } catch (_e) {}
+
+  return null;
 }
 
 export class OverlayApplication {
@@ -190,11 +254,14 @@ export class OverlayApplication {
   private parentPid?: number;
   private wsPort: number;
   private isPetHidden = false;
+  private isSendingChatMessage = false;
   private dragStartCursor: { x: number; y: number } | null = null;
   private dragStartWindowPos: [number, number] | null = null;
+  private lastActiveAgPid: number | null = null;
+  private lastActiveAgHwnd: string | null = null;
 
   private enforceTopmost = (): void => {
-    if (this.isPetHidden) return;
+    if (this.isPetHidden || this.isSendingChatMessage) return;
     if (this.mainWindow && !this.mainWindow.isDestroyed() && this.mainWindow.isVisible()) {
       try {
         this.mainWindow.setAlwaysOnTop(true, 'screen-saver');
@@ -210,6 +277,16 @@ export class OverlayApplication {
   constructor(cliArgs: { parentPid?: number; wsPort?: number } = {}) {
     this.parentPid = cliArgs.parentPid;
     logDebug(`OverlayApplication instantiated with parentPid=${this.parentPid}, wsPort=${cliArgs.wsPort}`);
+
+    // If parentPid was not provided on CLI, dynamically locate current visible Antigravity window
+    if (!this.parentPid) {
+      const detected = findAntigravityWindowPid();
+      if (detected) {
+        this.parentPid = detected;
+        logDebug(`Dynamically detected Antigravity window PID: ${detected}`);
+      }
+    }
+
     this.configManager = new ConfigManager(undefined, {
       parentPid: this.parentPid,
       wsPort: cliArgs.wsPort,
@@ -217,9 +294,7 @@ export class OverlayApplication {
 
     const config = this.configManager.getConfig();
     this.wsPort = cliArgs.wsPort || config.wsPort || DEFAULT_WS_PORT;
-    if (this.parentPid === undefined && config.parentPid) {
-      this.parentPid = config.parentPid;
-    }
+    // Strictly do NOT load parentPid from config file
   }
 
   public async start(): Promise<void> {
@@ -267,6 +342,30 @@ export class OverlayApplication {
     }
   }
 
+  private lastForwardedKey: string = '';
+  private lastForwardedTime: number = 0;
+  private hasActiveBridgeConnection: boolean = false;
+
+  private forwardStateUpdate(payload: StatePayload, source: 'bridge' | 'watcher'): void {
+    if (!this.mainWindow || this.mainWindow.isDestroyed()) return;
+
+    // If bridge (IDE extension) is actively connected, ignore autonomous watcher duplicates
+    if (source === 'watcher' && this.hasActiveBridgeConnection) {
+      return;
+    }
+
+    // 300ms deduplication window on identical (state + summary)
+    const key = `${payload.state}:::${payload.summary}`;
+    const now = Date.now();
+    if (key === this.lastForwardedKey && now - this.lastForwardedTime < 300) {
+      return;
+    }
+
+    this.lastForwardedKey = key;
+    this.lastForwardedTime = now;
+    this.mainWindow.webContents.send('state_update', payload);
+  }
+
   private initBridge(): void {
     this.bridge = new ClientBridge({
       port: this.wsPort,
@@ -275,10 +374,17 @@ export class OverlayApplication {
 
     this.bridge.on('error', () => {}); // Prevent unhandled EventEmitter rejection on initial connection attempts
 
+    this.bridge.on('connected', () => {
+      this.hasActiveBridgeConnection = true;
+    });
+
+    this.bridge.on('disconnected', () => {
+      this.hasActiveBridgeConnection = false;
+    });
+
     this.bridge.on('state_update', (payload: StatePayload) => {
-      if (this.mainWindow && !this.mainWindow.isDestroyed()) {
-        this.mainWindow.webContents.send('state_update', payload);
-      }
+      this.hasActiveBridgeConnection = true;
+      this.forwardStateUpdate(payload, 'bridge');
     });
 
     this.bridge.on('config_update', (config: Partial<PetConfig>) => {
@@ -301,9 +407,7 @@ export class OverlayApplication {
       const brainDir = modules.resolveDefaultBrainDir();
       this.stateMachine = new modules.AgentStateMachine();
       this.stateMachine.on('state_change', (payload: StatePayload) => {
-        if (this.mainWindow && !this.mainWindow.isDestroyed()) {
-          this.mainWindow.webContents.send('state_update', payload);
-        }
+        this.forwardStateUpdate(payload, 'watcher');
       });
 
       this.transcriptWatcher = new modules.TranscriptWatcher({
@@ -313,8 +417,8 @@ export class OverlayApplication {
         autoStart: true,
       });
 
-      this.transcriptWatcher.on('line', (line: string) => {
-        this.stateMachine?.processLine(line);
+      this.transcriptWatcher.on('line', (line: string, filePath?: string) => {
+        this.stateMachine?.processLine(line, filePath);
       });
 
       logDebug(`Autonomous transcript watcher started successfully on ${brainDir}`);
@@ -401,22 +505,6 @@ export class OverlayApplication {
       if (this.mainWindow && !this.mainWindow.isDestroyed()) {
         this.mainWindow.show();
         this.enforceTopmost();
-        logDebug(`WINDOW DIAG: bounds=${JSON.stringify(this.mainWindow.getBounds())}, visible=${this.mainWindow.isVisible()}, isAlwaysOnTop=${this.mainWindow.isAlwaysOnTop()}, isMinimized=${this.mainWindow.isMinimized()}`);
-        
-        // Wait 500ms for first frames to paint, then capture window pixels
-        setTimeout(async () => {
-          try {
-            if (this.mainWindow && !this.mainWindow.isDestroyed()) {
-              const pageImg = await this.mainWindow.webContents.capturePage();
-              const pageBuf = pageImg.toPNG();
-              const pageCapPath = 'C:/Users/lennielan/AppData/Roaming/ag-pet/window-capture.png';
-              fs.writeFileSync(pageCapPath, pageBuf);
-              logDebug(`PAGE CAPTURE SAVED: size=${pageBuf.length} bytes, dimensions=${JSON.stringify(pageImg.getSize())}`);
-            }
-          } catch (capErr: any) {
-            logDebug(`PAGE CAPTURE ERROR: ${capErr?.message || capErr}`);
-          }
-        }, 500);
       }
     });
 
@@ -437,7 +525,9 @@ export class OverlayApplication {
     const topmostInterval = setInterval(this.enforceTopmost, 2500);
 
     this.mainWindow.webContents.on('console-message', (_e: any, level: any, message: any, line: any, sourceId: any) => {
-      logDebug(`RENDERER [${level}] ${message} (line ${line} in ${sourceId})`);
+      if (level >= 2) {
+        logDebug(`RENDERER [${level}] ${message} (line ${line} in ${sourceId})`);
+      }
     });
 
     this.mainWindow.on('close', () => {
@@ -576,9 +666,127 @@ export class OverlayApplication {
       }
     });
 
+    ipcMain.on('ag-pet:prepare-compose', () => {
+      this.captureForegroundWindow();
+    });
+
+    ipcMain.on('ag-pet:send-chat-message', (_event: any, text: string) => {
+      this.handleSendChatMessage(text);
+    });
+
     ipcMain.on('pet_close', () => {
       this.terminate();
     });
+  }
+
+  public captureForegroundWindow(): void {
+    if (process.platform !== 'win32') return;
+    const psScript = `
+$w = Add-Type -MemberDefinition '[DllImport("user32.dll")] public static extern IntPtr GetForegroundWindow(); [DllImport("user32.dll")] public static extern uint GetWindowThreadProcessId(IntPtr hWnd, out uint pid);' -Name "WinUtil" -Namespace "AGPet" -PassThru -ErrorAction SilentlyContinue
+$h = [AGPet.WinUtil]::GetForegroundWindow()
+$p = 0
+[AGPet.WinUtil]::GetWindowThreadProcessId($h, [ref]$p)
+"$h,$p"
+`;
+    child_process.execFile(
+      'powershell.exe',
+      ['-NoProfile', '-NonInteractive', '-Command', psScript],
+      { windowsHide: true },
+      (err, stdout) => {
+        if (!err && stdout) {
+          const parts = stdout.trim().split(',');
+          if (parts.length === 2) {
+            const hwnd = parts[0].trim();
+            const pid = parseInt(parts[1].trim(), 10);
+            if (pid > 0 && pid !== process.pid) {
+              this.lastActiveAgPid = pid;
+              this.lastActiveAgHwnd = hwnd;
+              logDebug(`Captured active foreground window: PID=${pid}, HWND=${hwnd}`);
+            }
+          }
+        }
+      }
+    );
+  }
+
+  public handleSendChatMessage(text: string): void {
+    logDebug(`handleSendChatMessage: "${text}"`);
+    if (!text || typeof text !== 'string' || !text.trim()) return;
+
+    this.isSendingChatMessage = true;
+
+    const clipboard = electronModule?.clipboard;
+    let originalClipboard = '';
+    try {
+      if (clipboard) {
+        originalClipboard = clipboard.readText();
+        clipboard.writeText(text);
+      }
+    } catch (err: any) {
+      logDebug(`Clipboard write error: ${err?.message || err}`);
+    }
+
+    if (this.mainWindow && !this.mainWindow.isDestroyed()) {
+      try {
+        if (typeof this.mainWindow.setIgnoreMouseEvents === 'function') {
+          this.mainWindow.setIgnoreMouseEvents(true, { forward: true });
+        }
+        if (typeof this.mainWindow.blur === 'function') {
+          this.mainWindow.blur();
+        }
+      } catch (_e) {}
+    }
+
+    const scriptPath = path.resolve(__dirname, '..', '..', 'scripts', 'send-chat-message.ps1');
+    const targetHwnd = this.lastActiveAgHwnd || '0';
+    const targetPid = this.lastActiveAgPid || this.parentPid || 0;
+    logDebug(`Executing send-chat-message.ps1 with targetHwnd=${targetHwnd}, targetPid=${targetPid}`);
+
+    if (process.platform === 'win32') {
+      child_process.execFile(
+        'powershell.exe',
+        [
+          '-NoProfile',
+          '-NonInteractive',
+          '-ExecutionPolicy',
+          'Bypass',
+          '-File',
+          scriptPath,
+          '-TargetHwnd',
+          String(targetHwnd),
+          '-TargetPid',
+          String(targetPid),
+        ],
+        { windowsHide: true },
+        (err, stdout, stderr) => {
+          if (err) {
+            logDebug(`send-chat-message.ps1 error: ${err.message}, stderr: ${stderr}`);
+          } else {
+            logDebug(`send-chat-message.ps1 result: ${stdout ? stdout.trim() : ''}`);
+          }
+
+          // Restore user's previous clipboard after pasting
+          setTimeout(() => {
+            try {
+              if (clipboard && originalClipboard !== undefined) {
+                clipboard.writeText(originalClipboard);
+                logDebug('Restored user clipboard');
+              }
+            } catch (_e) {}
+          }, 500);
+
+          // Reset sending flag and re-enforce topmost after 1200ms
+          setTimeout(() => {
+            this.isSendingChatMessage = false;
+            if (!this.isPetHidden) {
+              this.enforceTopmost();
+            }
+          }, 1200);
+        }
+      );
+    } else {
+      this.isSendingChatMessage = false;
+    }
   }
 
   public hidePet(): void {

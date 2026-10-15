@@ -14,5 +14,12 @@
   "include": [
     "main/**/*",
     "renderer/**/*"
+  ],
+  "exclude": [
+    "node_modules",
+    "dist",
+    "**/dist",
+    "tests",
+    "scripts"
   ]
 }
