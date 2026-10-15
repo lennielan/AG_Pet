@@ -4,7 +4,7 @@
   "description": "AG Pet - Desktop Pet Overlay Electron Application",
   "main": "dist/desktop-overlay/main/index.js",
   "scripts": {
-    "build": "tsc && node -e \"const fs=require('fs'); fs.copyFileSync('renderer/index.html', 'dist/desktop-overlay/renderer/index.html'); fs.copyFileSync('renderer/style.css', 'dist/desktop-overlay/renderer/style.css');\"",
+    "build": "tsc && node -e \"const fs=require('fs'); fs.copyFileSync('renderer/index.html', 'dist/desktop-overlay/renderer/index.html'); fs.copyFileSync('renderer/style.css', 'dist/desktop-overlay/renderer/style.css'); if (fs.existsSync('renderer/assets')) fs.cpSync('renderer/assets', 'dist/desktop-overlay/renderer/assets', {recursive: true});\"",
     "typecheck": "tsc --noEmit",
     "start": "electron ."
   },
