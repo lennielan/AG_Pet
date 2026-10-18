@@ -276,6 +276,17 @@ export class StatusBadge {
         this.thinkingSeconds = 1;
         this.thinkingInterval = setInterval(() => {
           this.thinkingSeconds++;
+          if (this.thinkingSeconds >= 12) {
+            clearInterval(this.thinkingInterval);
+            this.thinkingInterval = null;
+            this.currentState = 'idle';
+            this.currentSummary = 'В ожидании';
+            this.currentIconType = 'idle';
+            this.isAutoPinned = false;
+            this.syncVisibility();
+            this.render();
+            return;
+          }
           this.currentSummary = `Думаю ${this.thinkingSeconds}с...`;
           this.render();
         }, 1000);

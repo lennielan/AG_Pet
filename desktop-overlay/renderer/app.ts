@@ -100,7 +100,7 @@ export class PetOverlayRendererApp {
   private lastStateChangeTime = 0;
   private pendingStateTimer: any = null;
   private pendingPayload: StatePayload | null = null;
-  private workingToThinkingTimer: any = null;
+  private clearThinkingTimer: any = null;
 
   // Interactive Dynamic Bottom Dock
   private dockState: 'line' | 'hover' | 'expanded' = 'line';
@@ -257,6 +257,12 @@ export class PetOverlayRendererApp {
 
     this.updateCanvasDimensionsCss();
 
+    if (this.dockElement) {
+      this.dockElement.addEventListener('click', (e) => {
+        e.stopPropagation();
+      });
+    }
+
     if (this.dockWriteBtn) {
       this.dockWriteBtn.addEventListener('click', (e) => {
         e.stopPropagation();
@@ -265,6 +271,9 @@ export class PetOverlayRendererApp {
     }
 
     if (this.dockInput) {
+      this.dockInput.addEventListener('click', (e) => {
+        e.stopPropagation();
+      });
       this.dockInput.addEventListener('input', () => {
         const val = this.dockInput?.value || '';
         const progress = Math.min(1, val.length / 28);
@@ -365,12 +374,8 @@ export class PetOverlayRendererApp {
       ipcRenderer.send('ag-pet:send-chat-message', text);
     }
 
-    this.statusBadge.showTemporary('Отправляю в чат...', 'terminal', 2500);
-    this.updateState({
-      state: 'running',
-      summary: 'В работе...',
-      timestamp: Date.now(),
-    });
+    this.statusBadge.showTemporary('Отправлено в чат', 'terminal', 2000);
+    this.petEngine.onClick();
 
     const audio = this.petEngine.getAudio();
     if (audio) {
@@ -761,9 +766,9 @@ export class PetOverlayRendererApp {
       clearInterval(this.breakTimer);
       this.breakTimer = null;
     }
-    if (this.workingToThinkingTimer) {
-      clearTimeout(this.workingToThinkingTimer);
-      this.workingToThinkingTimer = null;
+    if (this.clearThinkingTimer) {
+      clearTimeout(this.clearThinkingTimer);
+      this.clearThinkingTimer = null;
     }
     if (this.pendingStateTimer) {
       clearTimeout(this.pendingStateTimer);
@@ -812,6 +817,21 @@ export class PetOverlayRendererApp {
       waving: 'Тест: Приветствие',
       sleeping: 'Тест: Сон',
     };
+    if (state === 'thinking') {
+      if (this.clearThinkingTimer) {
+        clearTimeout(this.clearThinkingTimer);
+        this.clearThinkingTimer = null;
+      }
+      if (this.pendingStateTimer) {
+        clearTimeout(this.pendingStateTimer);
+        this.pendingStateTimer = null;
+        this.pendingPayload = null;
+      }
+      this.petEngine.setState('thinking', true);
+      this.statusBadge.updateState('thinking', 'Думаю 1с...');
+      this.contextMenu.setActiveState('thinking');
+      return;
+    }
     this.updateState({
       state,
       summary: russianStateNames[state] || `Тест: ${state}`,
@@ -885,17 +905,34 @@ export class PetOverlayRendererApp {
       }
     }
 
-    // Cancel working-to-thinking timer if state is not running
-    if (payload.state !== 'running') {
-      if (this.workingToThinkingTimer) {
-        clearTimeout(this.workingToThinkingTimer);
-        this.workingToThinkingTimer = null;
+    // 12-second safety watchdog for thinking state: auto-reset to idle if no updates
+    if (this.clearThinkingTimer) {
+      clearTimeout(this.clearThinkingTimer);
+      this.clearThinkingTimer = null;
+    }
+
+    if (payload.state === 'thinking') {
+      if (this.pendingStateTimer) {
+        clearTimeout(this.pendingStateTimer);
+        this.pendingStateTimer = null;
+        this.pendingPayload = null;
+      }
+      this.clearThinkingTimer = setTimeout(() => {
+        this.clearThinkingTimer = null;
+        if (this.petEngine.getState() === 'thinking') {
+          this.petEngine.setState('idle', false);
+          this.statusBadge.updateState('idle', 'В ожидании');
+        }
+      }, 12000);
+      if (typeof this.clearThinkingTimer?.unref === 'function') {
+        this.clearThinkingTimer.unref();
       }
     }
 
-    // If incoming state is running, blocked, needs_input, or ready, cancel any pending hysteresis transition
+    // If incoming state is running, thinking, blocked, needs_input, or ready, cancel any pending hysteresis transition
     if (
       payload.state === 'running' ||
+      payload.state === 'thinking' ||
       payload.state === 'blocked' ||
       payload.state === 'needs_input' ||
       payload.state === 'ready'
@@ -917,34 +954,6 @@ export class PetOverlayRendererApp {
       this.pendingPayload = null;
     }
 
-    if (this.workingToThinkingTimer) {
-      clearTimeout(this.workingToThinkingTimer);
-      this.workingToThinkingTimer = null;
-    }
-
-    if (payload.state === 'running') {
-      const isUserInput =
-        payload.metadata?.type === 'USER_INPUT' ||
-        payload.metadata?.role === 'user' ||
-        payload.summary?.includes('В работе...') ||
-        payload.summary?.includes('Processing request');
-      const delay = isUserInput ? 1200 : 1800;
-
-      this.workingToThinkingTimer = setTimeout(() => {
-        this.workingToThinkingTimer = null;
-        if (this.petEngine.getState() === 'running') {
-          this.applyState({
-            state: 'thinking',
-            summary: 'Думаю 1с...',
-            timestamp: Date.now(),
-            metadata: { thinking: true, autoThinking: true },
-          });
-        }
-      }, delay);
-      if (typeof this.workingToThinkingTimer?.unref === 'function') {
-        this.workingToThinkingTimer.unref();
-      }
-    }
 
     const prevState = this.petEngine.getState();
     if (prevState !== payload.state) {

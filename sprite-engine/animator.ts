@@ -392,41 +392,27 @@ export class PetAnimator {
 
   /**
    * Choreography 2: RUNNING
-   * Lissajous Figure-8 hover with orbital floating hands and smooth pulse wave face.
+   * Coder typing intensely on floating isometric laptop with focused eyes.
    */
   private computeRunningTarget(dt: number): RigPose {
     const t = this.totalTime;
 
-    // 1. Torso: Lissajous Figure-8 hover
-    const torsoDx = Math.sin(2.4 * t) * 1.4;
-    const torsoDy = Math.sin(4.8 * t) * 1.6;
+    // 1. Torso & Head: Steady slight hovering bob with zero rotation
+    const torsoDx = 0;
+    const torsoDy = Math.sin(3.2 * t) * 0.8;
     const torsoRot = 0;
 
-    // 2. Head: Overlapping action following torso with phase lag (-0.45 rad)
-    const headDx = Math.sin(2.4 * t - 0.45) * 1.6;
-    const headDy = Math.sin(4.8 * t - 0.45) * 1.6;
-    const headRot = 0;
-
-    // 3. Floating hands: Orbital anti-phase ellipses alongside body (no overlap with torso)
-    const handOrbitSpeed = 6.5;
-    const leftHandDx = Math.cos(handOrbitSpeed * t) * 1.2 + torsoDx * 0.5;
-    const leftHandDy = Math.sin(handOrbitSpeed * t) * 2.4 + torsoDy * 0.5;
-
-    const rightHandDx = -Math.cos(handOrbitSpeed * t) * 1.2 + torsoDx * 0.5;
-    const rightHandDy = Math.sin(handOrbitSpeed * t + Math.PI) * 2.4 + torsoDy * 0.5;
+    // 2. Typing hands: Forearms remain firmly locked to torso; keystroke articulation is driven by 2-frame sprite cycling
+    const leftHandDx = 0;
+    const leftHandDy = 0;
+    const rightHandDx = 0;
+    const rightHandDy = 0;
     const leftHandRot = 0;
     const rightHandRot = 0;
 
-    // Glancing look
-    const lookX = Math.sin(2.4 * t) * 1.5;
-    const lookY = 0;
-
-    // Ring particles timer
-    this.particleSpawnTimer += dt;
-    if (this.particleSpawnTimer >= 0.15) {
-      this.particleSpawnTimer = 0;
-      this.spawnRingParticle(32, this.BASE_RING_Y + torsoDy * 0.5, 2.0);
-    }
+    // 3. Focused look reading code / screen: glance tracking with slight downward bias
+    const lookX = Math.sin(4.0 * t) * 1.5;
+    const lookY = 0.5;
 
     return {
       torso: createTransform(torsoDx, torsoDy, torsoRot, 1.0, 1.0),
@@ -706,21 +692,28 @@ export class PetAnimator {
    */
   private computeThinkingTarget(dt: number): RigPose {
     const t = this.totalTime;
-    const torsoDy = Math.sin(1.8 * t) * 1.5;
-    const headDy = torsoDy - 0.8;
+    const torsoDy = Math.sin(2.0 * t) * 1.5;
+    const torsoDx = Math.sin(1.0 * t) * 0.8; // Slow pensive hover sway
+    const headDx = torsoDx;
+    const headDy = torsoDy;
+
+    // Calm hovering left hand
+    const leftHandDx = 1.5;
+    const leftHandDy = torsoDy + 0.5;
 
     // Right hand at chin tapping gently (gravi_right_hand_think_256.png)
-    const rightHandDy = torsoDy + Math.sin(5.0 * t) * 0.8;
-    const leftHandDy = torsoDy * 0.8;
+    const rightHandDx = 0;
+    const rightHandDy = torsoDy + Math.sin(7.0 * t) * 1.4;
 
-    const lookX = Math.sin(1.2 * t) * 1.8;
-    const lookY = -1.0;
+    // Thoughtful gaze directed upwards and gently wandering
+    const lookX = Math.sin(1.4 * t) * 2.2;
+    const lookY = -1.2;
 
     return {
-      torso: createTransform(0, torsoDy, 0, 1.0, 1.0),
-      head: createTransform(0, torsoDy, 0, 1.0, 1.0),
-      leftHand: createTransform(0, leftHandDy, 0, 1.0, 1.0),
-      rightHand: createTransform(0, rightHandDy, 0, 1.0, 1.0),
+      torso: createTransform(torsoDx, torsoDy, 0, 1.0, 1.0),
+      head: createTransform(headDx, headDy, 0, 1.0, 1.0),
+      leftHand: createTransform(leftHandDx, leftHandDy, 0, 1.0, 1.0),
+      rightHand: createTransform(rightHandDx, rightHandDy, 0, 1.0, 1.0),
       lookX,
       lookY,
       eyeScaleY: 1.0,

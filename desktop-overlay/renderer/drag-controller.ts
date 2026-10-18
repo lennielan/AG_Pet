@@ -184,6 +184,9 @@ export class DragController {
 
   private handlePointerDown(e: PointerEvent): void {
     if (e.button !== 0) return; // Only track primary left click
+    if ((e.target as HTMLElement)?.closest?.('#bottom-dock, #context-menu')) {
+      return;
+    }
     this.startDrag(e.screenX, e.screenY);
   }
 
@@ -194,6 +197,11 @@ export class DragController {
 
   private handlePointerUp(e: PointerEvent): void {
     if (!this.isDraggingActive) return;
+    if ((e.target as HTMLElement)?.closest?.('#bottom-dock, #context-menu')) {
+      this.isDraggingActive = false;
+      this.hasExceededDragThreshold = false;
+      return;
+    }
 
     const wasDrag = this.hasExceededDragThreshold;
     this.endDrag();

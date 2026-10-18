@@ -318,4 +318,238 @@ for name, img_part in [
 ]:
     img_part.save(os.path.join(artifact_dir, name), 'PNG')
 
-print('All skeletal rigging parts including alternate hands cleanly generated and exported!')
+def generate_running_assets(body_64_rgba, out_dirs):
+    """
+    Генерирует идеальные попиксельные ассеты для состояния running (256x256):
+    1. gravi_body_running_256.png — корпус, где нижняя часть звезды аккуратно скрыта под белую броню груди (только верхний золотой кончик виден над рукой, никаких прямоугольников в renderer.ts!).
+    2. gravi_laptop_256.png — изометрический ноутбук с мягким свечением экрана без черных куполов.
+    3. gravi_left_hand_typing_1_256.png и gravi_left_hand_typing_2_256.png — 2 кадра артикуляции левой руки (предплечье неподвижно у плеча, двигаются только кисть и пальцы!).
+    4. gravi_right_hand_typing_1_256.png и gravi_right_hand_typing_2_256.png — 2 кадра артикуляции правой руки за ноутбуком + динамические штрихи движения.
+    """
+    from PIL import Image
+    import os
+
+    PAL = {
+        '.': (0, 0, 0, 0),
+        'O': (8, 11, 26, 255),       # Темный контур
+        'W': (244, 248, 255, 255),   # Белый блик брони/манжеты
+        'S': (188, 210, 246, 255),   # Голубоватая тень белой брони
+        'L': (78, 142, 247, 255),    # Светло-синий блик руки
+        'B': (45, 104, 224, 255),    # Основной синий цвет руки
+        'D': (24, 58, 154, 255),     # Темно-синяя тень руки
+        'C': (44, 232, 245, 255),    # Яркий неоновый голубой (кончик пальца / клавиши / лого)
+        'H': (165, 250, 255, 255),   # Белый-голубой центр свечения
+        'T': (20, 168, 198, 255),    # Бирюзовый цвет клавиш и пальцев в свете экрана
+        'M': (156, 168, 188, 220),   # Серые штрихи быстрого движения руки
+        'G': (135, 142, 160, 255),   # Основной серый металл крышки ноутбука
+        'E': (182, 189, 206, 255),   # Светлая верхняя грань крышки ноутбука
+        'K': (92, 98, 116, 255),     # Темно-серая тень корпуса ноутбука
+        'N': (28, 38, 60, 255),      # Темная ниша клавиатуры
+        '1': (44, 232, 245, 55),     # Мягкое полупрозрачное свечение экрана (внешнее)
+        '2': (44, 232, 245, 90),     # Мягкое полупрозрачное свечение экрана (внутреннее)
+    }
+
+    def draw_ascii_map(canvas_64, x0, y0, rows):
+        px = canvas_64.load()
+        for dy, row in enumerate(rows):
+            y = y0 + dy
+            if not (0 <= y < 64):
+                continue
+            for dx, ch in enumerate(row):
+                x = x0 + dx
+                if not (0 <= x < 64) or ch == '.':
+                    continue
+                color = PAL.get(ch)
+                if color:
+                    px[x, y] = color
+
+    # 1. Корпус для running: аккуратно убираем нижнюю часть звезды внутри самой текстуры груди,
+    # оставляя только верхний золотой лучик (Y <= 36) и добавляя 2 маленьких штриха на груди справа
+    body_run = body_64_rgba.copy()
+    bpx = body_run.load()
+    for y in range(37, 45):
+        for x in range(27, 37):
+            # Заменяем пиксели нижней части звезды на естественный цвет белой грудной пластины
+            if y < 42:
+                bpx[x, y] = (244, 248, 255, 255)
+            else:
+                bpx[x, y] = (188, 210, 246, 255)
+    # Закрываем контур под верхним золотым лучиком звезды на Y=37
+    bpx[31, 37] = (8, 11, 26, 255)
+    bpx[32, 37] = (8, 11, 26, 255)
+    bpx[33, 37] = (8, 11, 26, 255)
+    # Два маленьких темных штриха детализации на правой стороне груди (как на референсе)
+    bpx[36, 37] = (24, 42, 84, 255)
+    bpx[38, 37] = (24, 42, 84, 255)
+    bpx[38, 38] = (24, 42, 84, 255)
+
+    # 2. ЛЕВАЯ РУКА (Кадр 1 — палец нажимает клавишу, Кадр 2 — кисть приподнята на 1px)
+    # Координаты вставки: x0 = 20, y0 = 36 (размер 18x9)
+    # Предплечье слева (столбцы 0..9) остается НЕПОДВИЖНЫМ, двигается только кисть и 2 диагональных пальца!
+    LEFT_HAND_F1 = [
+        "....OOOOOO........", # Y=36: верхний контур наплечника/предплечья
+        "..OOLLLLLLOO......", # Y=37: светло-синий блик предплечья
+        ".OLLBBBBBBBBOO....", # Y=38: округлое синее предплечье
+        ".OBBBBBBBBOOOBOO..", # Y=39: переход в кисть + верхний палец
+        ".ODBBBBDOOWWOOBBO.", # Y=40: низ предплечья + белая манжета + пальцы под углом
+        "..OOOOOOWWWSSOOBCO", # Y=41: белая манжета с тенью + голубой светящийся кончик пальца!
+        ".......OOOOOOOBBOO", # Y=42: нижний контур манжеты и средний палец
+        "............OOOOO.", # Y=43: контур кончиков пальцев
+        "..................", # Y=44
+    ]
+
+    LEFT_HAND_F2 = [
+        "....OOOOOO........", # Y=36: предплечье стоит на месте!
+        "..OOLLLLLLOO......", # Y=37: предплечье стоит на месте!
+        ".OLLBBBBBBBBOOO...", # Y=38: кисть и пальцы приподнялись на 1 пиксель вверх
+        ".OBBBBBBBBOOWWBOO.", # Y=39: белая манжета + пальцы чуть выше
+        ".ODBBBBDOOWWWSSBCO", # Y=40: пальцы приподняты над клавишей
+        "..OOOOOOO.OOOOOBBO", # Y=41: контур под приподнятой кистью
+        ".............OOOO.", # Y=42: контур пальцев
+        "..................", # Y=43
+        "..................", # Y=44
+    ]
+
+    # 3. ПРАВАЯ РУКА ЗА НОУТБУКОМ (Кадр 1 — приподнята, Кадр 2 — нажатие + штрихи движения)
+    # Координаты вставки: x0 = 40, y0 = 31 (размер 13x9)
+    RIGHT_HAND_F1 = [
+        ".............", # Y=31
+        "..OOOOO......", # Y=32: кисть приподнята на 1px
+        ".OWWWWWOO....", # Y=33: белая верхняя крышка кисти
+        ".OWWWWSSSO...", # Y=34: белая крышка с голубоватой тенью
+        ".OOTTTBBOO...", # Y=35: два сине-бирюзовых пальца
+        "..OTCTOBBO...", # Y=36: кончики пальцев
+        "...OOO.OOO...", # Y=37: нижний контур пальцев
+        ".............", # Y=38
+    ]
+
+    RIGHT_HAND_F2 = [
+        "........M....", # Y=31: верхний штрих движения
+        ".......M..M..", # Y=32: штрихи движения над правой рукой (как на референсе!)
+        "..OOOOO...M..", # Y=33: контур кисти (опустилась на 1px в нажатие)
+        ".OWWWWWOO....", # Y=34: белая верхняя крышка кисти
+        ".OWWWWSSSO...", # Y=35: белая крышка с тенью
+        ".OOTTTBBOO...", # Y=36: пальцы нажимают клавиши
+        "..OTCHOBCO...", # Y=37: кончики пальцев ярко вспыхивают от нажатия!
+        "...OOO.OOO...", # Y=38: нижний контур пальцев
+    ]
+
+    # 4. ИЗОМЕТРИЧЕСКИЙ НОУТБУК С МЯГКИМ СВЕЧЕНИЕМ ЭКРАНА (БЕЗ черного купола!)
+    # Координаты вставки: x0 = 28, y0 = 36 (размер 30x14)
+    LAPTOP_MAP = [
+        "...........1111111..........", # Y=36: легкое свечение от экрана (без контура!)
+        "..........112222211.......OOO.", # Y=37: свечение + правый верхний уголок крышки
+        ".........122222221....OOOOEEO.", # Y=38: ступенчатая верхняя грань крышки (E - светлая фаска)
+        "........12222221..OOOOEEEEGGO.", # Y=39: верхняя грань крышки ноутбука
+        "......OOOONNNNOOOOEEEEGGGGGGO.", # Y=40: стык клавиатуры и крышки ноутбука
+        "....OONNTCNTCTNNOGGGGGGGGGGGO.", # Y=41: клавиши (T,C) + серая крышка (G)
+        "..OONNTCTNTCTNNOOGGGGGCCCGGGO.", # Y=42: клавиши + голубой логотип (C) в центре крышки!
+        ".ONNTCNTCTNTNNOOGGGGCCCCGGGO..", # Y=43: клавиши + яркий центр логотипа на крышке
+        ".OKKNNTCTNTNNOOGGGGCCCGGGGKO..", # Y=44: бортик базы (K) + крышка
+        "..OOKKNNTCTNOOGGGGGGGGGGGKO...", # Y=45: левый край базы опускается к петле
+        "....OOKKNNNOOGGGGGGGGGKOOO....", # Y=46: низ клавиатуры + правый нижний угол крышки
+        "......OOKKOOGGGGGGGKOOO.......", # Y=47: петля ноутбука
+        "........OOOKKKKKOOOO..........", # Y=48: нижний угол петли ноутбука
+        "..........OOOOOO..............", # Y=49: замыкающий контур
+    ]
+
+    def export_64_to_256(img64, filename):
+        img256 = img64.resize((256, 256), Image.NEAREST)
+        for d in out_dirs:
+            os.makedirs(d, exist_ok=True)
+            img256.save(os.path.join(d, filename))
+
+    # Экспорт корпуса для running
+    export_64_to_256(body_run, "gravi_body_running_256.png")
+
+    # Экспорт ноутбука
+    laptop_64 = Image.new("RGBA", (64, 64), (0, 0, 0, 0))
+    draw_ascii_map(laptop_64, 28, 36, LAPTOP_MAP)
+    export_64_to_256(laptop_64, "gravi_laptop_256.png")
+
+    # Экспорт 2 кадров левой руки (и базового файла для совместимости)
+    lh1_64 = Image.new("RGBA", (64, 64), (0, 0, 0, 0))
+    draw_ascii_map(lh1_64, 20, 36, LEFT_HAND_F1)
+    export_64_to_256(lh1_64, "gravi_left_hand_typing_1_256.png")
+    export_64_to_256(lh1_64, "gravi_left_hand_typing_256.png")
+
+    lh2_64 = Image.new("RGBA", (64, 64), (0, 0, 0, 0))
+    draw_ascii_map(lh2_64, 20, 36, LEFT_HAND_F2)
+    export_64_to_256(lh2_64, "gravi_left_hand_typing_2_256.png")
+
+    # Экспорт 2 кадров правой руки (и базового файла для совместимости)
+    rh1_64 = Image.new("RGBA", (64, 64), (0, 0, 0, 0))
+    draw_ascii_map(rh1_64, 40, 31, RIGHT_HAND_F1)
+    export_64_to_256(rh1_64, "gravi_right_hand_typing_1_256.png")
+    export_64_to_256(rh1_64, "gravi_right_hand_typing_256.png")
+
+    rh2_64 = Image.new("RGBA", (64, 64), (0, 0, 0, 0))
+    draw_ascii_map(rh2_64, 40, 31, RIGHT_HAND_F2)
+    export_64_to_256(rh2_64, "gravi_right_hand_typing_2_256.png")
+
+    # Экспорт 2 цельных попиксельно сшитых кадров всего состояния running (Gravi Coder)
+    ref_user_path = 'C:/Users/lennielan/.gemini/antigravity/brain/829b2a0e-fac4-4746-92f2-d9d0d1042177/.user_uploaded/media_1792158066036_f9241482.png'
+    if os.path.exists(ref_user_path):
+        ref_img = Image.open(ref_user_path).convert('RGB')
+        crop = ref_img.crop((40, 140, 220, 350))
+        c_arr = np.array(crop)
+        out64 = Image.new('RGB', (64, 64), (17, 17, 17))
+        opx = out64.load()
+        sx, sy, ox, oy = 4.0, 4.0, -49, 3
+        for y in range(64):
+            for x in range(64):
+                cx = int(round(ox + (x + 0.5) * sx))
+                cy = int(round(oy + (y + 0.5) * sy))
+                if 0 <= cx < c_arr.shape[1] and 0 <= cy < c_arr.shape[0]:
+                    opx[x, y] = tuple(c_arr[cy, cx])
+        a64 = np.array(out64)
+        H_c, W_c, _ = a64.shape
+        is_bg_ref = np.zeros((H_c, W_c), dtype=bool)
+        q_ref = deque()
+        for x in range(W_c):
+            q_ref.append((x, 0))
+            q_ref.append((x, H_c - 1))
+        for y in range(H_c):
+            q_ref.append((0, y))
+            q_ref.append((W_c - 1, y))
+        visited_ref = np.zeros((H_c, W_c), dtype=bool)
+        while q_ref:
+            x, y = q_ref.popleft()
+            if visited_ref[y, x]:
+                continue
+            visited_ref[y, x] = True
+            r_c, g_c, b_c = a64[y, x]
+            if r_c < 30 and g_c < 30 and b_c < 30:
+                is_bg_ref[y, x] = True
+                for dx, dy in ((-1,0), (1,0), (0,-1), (0,1)):
+                    nx, ny = x + dx, y + dy
+                    if 0 <= nx < W_c and 0 <= ny < H_c and not visited_ref[ny, nx]:
+                        q_ref.append((nx, ny))
+        ref_rgba = np.zeros((H_c, W_c, 4), dtype=np.uint8)
+        ref_rgba[:, :, :3] = a64
+        ref_rgba[:, :, 3] = 255
+        ref_rgba[is_bg_ref, 3] = 0
+
+        b_clean_arr = np.array(body_64_rgba)
+        f2_arr = ref_rgba.copy()
+        f2_arr[:30, :, :] = b_clean_arr[:30, :, :]
+        f2_arr[16:27, 21:43] = [29, 33, 68, 255]
+        f2_arr[1, 14] = [0, 0, 0, 0]
+        f2_arr[39, 42] = [140, 250, 255, 255]
+
+        f1_arr = f2_arr.copy()
+        f1_arr[30, 48] = [0, 0, 0, 0]
+        f1_arr[31, 49] = [0, 0, 0, 0]
+        for x in range(43, 49):
+            for y in range(31, 35):
+                f1_arr[y, x] = f2_arr[y + 1, x]
+            f1_arr[35, x] = f2_arr[36, x] if f2_arr[36, x, 3] > 0 else [0, 0, 0, 0]
+        f1_arr[42, 32] = [140, 250, 255, 255]
+
+        export_64_to_256(Image.fromarray(f1_arr, 'RGBA'), "gravi_running_frame1_256.png")
+        export_64_to_256(Image.fromarray(f2_arr, 'RGBA'), "gravi_running_frame2_256.png")
+
+body_64_rgba = head256.resize((64, 64), Image.NEAREST)
+generate_running_assets(body_64_rgba, [out_clean_dir, renderer_assets_dir, dist_assets_dir, artifact_dir])
+
+print('All skeletal rigging parts including alternate hands and unified running frames cleanly generated and exported!')

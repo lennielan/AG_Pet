@@ -31,6 +31,16 @@ export class PetRenderer {
   private leftHandUpImage: any = null;
   private rightHandThinkImage: any = null;
   private rightHandUpImage: any = null;
+  private bodyRunningImage: any = null;
+  private laptopImage: any = null;
+  private leftHandTypingImage: any = null;
+  private leftHandTyping1Image: any = null;
+  private leftHandTyping2Image: any = null;
+  private rightHandTypingImage: any = null;
+  private rightHandTyping1Image: any = null;
+  private rightHandTyping2Image: any = null;
+  private runningFrame1Image: any = null;
+  private runningFrame2Image: any = null;
   private skeletalPartsLoaded = false;
 
   public readonly NATIVE_SIZE = CANVAS_SIZE; // 64x64
@@ -122,6 +132,46 @@ export class PetRenderer {
         this.leftHandUpImage = new Image();
         this.leftHandUpImage.onload = onPartLoaded;
         this.leftHandUpImage.src = 'assets/gravi_left_hand_up_256.png';
+
+        this.bodyRunningImage = new Image();
+        this.bodyRunningImage.onload = onPartLoaded;
+        this.bodyRunningImage.src = 'assets/gravi_body_running_256.png';
+
+        this.laptopImage = new Image();
+        this.laptopImage.onload = onPartLoaded;
+        this.laptopImage.src = 'assets/gravi_laptop_256.png';
+
+        this.leftHandTypingImage = new Image();
+        this.leftHandTypingImage.onload = onPartLoaded;
+        this.leftHandTypingImage.src = 'assets/gravi_left_hand_typing_256.png';
+
+        this.leftHandTyping1Image = new Image();
+        this.leftHandTyping1Image.onload = onPartLoaded;
+        this.leftHandTyping1Image.src = 'assets/gravi_left_hand_typing_1_256.png';
+
+        this.leftHandTyping2Image = new Image();
+        this.leftHandTyping2Image.onload = onPartLoaded;
+        this.leftHandTyping2Image.src = 'assets/gravi_left_hand_typing_2_256.png';
+
+        this.rightHandTypingImage = new Image();
+        this.rightHandTypingImage.onload = onPartLoaded;
+        this.rightHandTypingImage.src = 'assets/gravi_right_hand_typing_256.png';
+
+        this.rightHandTyping1Image = new Image();
+        this.rightHandTyping1Image.onload = onPartLoaded;
+        this.rightHandTyping1Image.src = 'assets/gravi_right_hand_typing_1_256.png';
+
+        this.rightHandTyping2Image = new Image();
+        this.rightHandTyping2Image.onload = onPartLoaded;
+        this.rightHandTyping2Image.src = 'assets/gravi_right_hand_typing_2_256.png';
+
+        this.runningFrame1Image = new Image();
+        this.runningFrame1Image.onload = onPartLoaded;
+        this.runningFrame1Image.src = 'assets/gravi_running_frame1_256.png';
+
+        this.runningFrame2Image = new Image();
+        this.runningFrame2Image.onload = onPartLoaded;
+        this.runningFrame2Image.src = 'assets/gravi_running_frame2_256.png';
 
         // Master cropped asset fallback
         this.masterSpriteImage = new Image();
@@ -352,9 +402,124 @@ export class PetRenderer {
     };
 
     const COORD_RATIO = 4.0; // 256 / 64
+    const bodyImg = (this.bodyImage && this.bodyImage.complete && this.bodyImage.naturalWidth > 0) ? this.bodyImage : this.headImage;
+
+    // Specialized unified rendering for 'running' state (Coder with Laptop)
+    if (pose?.state === 'running') {
+      const p = Math.max(1, Math.round(4 * scale));
+      const tDx = 0;
+      const tDy = Math.round(rig.torso.dy) * p;
+
+      const now = typeof performance !== 'undefined' ? performance.now() : Date.now();
+      // 130ms frame cycle for natural keystroke articulation
+      const typingFrame = Math.floor(now / 130) % 2;
+
+      const runningImg = (typingFrame === 0 ? this.runningFrame1Image : this.runningFrame2Image)
+        || this.runningFrame1Image
+        || this.bodyRunningImage
+        || bodyImg;
+
+      // Layer 1: Unified Seamless Frame (Body, Star, Arms, Hands, Screen Glow, and V-Laptop)
+      ctx.save();
+      ctx.translate(tDx, tDy);
+      if (runningImg && runningImg.complete) {
+        ctx.drawImage(runningImg, 0, 0, w, h);
+      } else if (bodyImg) {
+        ctx.drawImage(bodyImg, 0, 0, w, h);
+      }
+
+      // Layer 2: Visor Screen Face (coder face - _ -) - procedurally centered at Y=21..23
+      this.drawScreenFace(ctx, scale, rig);
+      ctx.restore();
+
+      // Particles if any
+      if (pose && pose.particles && pose.particles.length > 0) {
+        this.drawParticles(ctx, pose.particles, scale);
+      }
+      return;
+    }
+
+    // Specialized rendering for 'thinking' state (Pensive robot with hand at chin)
+    if (pose?.state === 'thinking' || rig.expression === 'thinking') {
+      const p = Math.max(1, Math.round(4 * scale));
+      const tDx = Math.round(rig.torso.dx * COORD_RATIO * scale);
+      const tDy = Math.round(rig.torso.dy * COORD_RATIO * scale);
+
+      // Layer 1: Monolithic Body (torso, head) with gentle hover sway
+      ctx.save();
+      ctx.translate(tDx, tDy);
+      if (bodyImg) {
+        ctx.drawImage(bodyImg, 0, 0, w, h);
+      }
+
+      // Layer 2: Visor Screen Face (thoughtful squint eyes looking up)
+      this.drawScreenFace(ctx, scale, rig);
+      ctx.restore();
+
+      // Layer 3: Left Hand (calm hovering on left side)
+      if (this.leftHandImage) {
+        ctx.save();
+        const lhPivot = this.PIVOTS.leftHand;
+        const lhPivotX = (lhPivot.x + rig.leftHand.dx * COORD_RATIO) * scale;
+        const lhPivotY = (lhPivot.y + rig.leftHand.dy * COORD_RATIO) * scale;
+        ctx.translate(Math.round(lhPivotX), Math.round(lhPivotY));
+        if (Math.abs(rig.leftHand.rotation) > 0.08) {
+          ctx.rotate(rig.leftHand.rotation);
+        }
+        ctx.translate(-Math.round(lhPivot.x * scale), -Math.round(lhPivot.y * scale));
+        ctx.drawImage(this.leftHandImage, 0, 0, w, h);
+        ctx.restore();
+      }
+
+      // Layer 4: Right Hand at chin (tapping gently)
+      const hasThinkHand = this.rightHandThinkImage && this.rightHandThinkImage.complete && this.rightHandThinkImage.naturalWidth > 0;
+      const rhImg = hasThinkHand ? this.rightHandThinkImage : this.rightHandImage;
+      const rhPivot = hasThinkHand ? this.PIVOTS.rightHandThink : this.PIVOTS.rightHand;
+
+      ctx.save();
+      const rhDx = hasThinkHand ? (rig.torso.dx * COORD_RATIO) : (rig.rightHand.dx * COORD_RATIO);
+      const rhDy = (rig.rightHand.dy * COORD_RATIO);
+      const rhPivotX = (rhPivot.x + rhDx) * scale;
+      const rhPivotY = (rhPivot.y + rhDy) * scale;
+      ctx.translate(Math.round(rhPivotX), Math.round(rhPivotY));
+      ctx.translate(-Math.round(rhPivot.x * scale), -Math.round(rhPivot.y * scale));
+      ctx.drawImage(rhImg, 0, 0, w, h);
+      ctx.restore();
+
+      // Layer 5: Floating thought bubbles (○ -> ०) over right corner of helmet
+      const now = typeof performance !== 'undefined' ? performance.now() : Date.now();
+      const bubbleTime = (now / 1000) % 2.0;
+      const bubbleProgress = bubbleTime / 2.0;
+
+      // Small pixel bubbles floating upwards to top-right (x: 44..48, y: 14..8 in 64x64)
+      ctx.save();
+      ctx.fillStyle = '#8CFAFF';
+      // Bubble 1 (smallest, lower)
+      const b1Y = Math.round((14 - bubbleProgress * 4) * p);
+      const b1X = Math.round((44 + Math.sin(now * 0.005) * 1.0) * p);
+      ctx.fillRect(b1X, b1Y, Math.max(1, Math.round(2 * scale)), Math.max(1, Math.round(2 * scale)));
+
+      // Bubble 2 (medium, higher)
+      const b2Progress = (bubbleProgress + 0.4) % 1.0;
+      const b2Y = Math.round((11 - b2Progress * 5) * p);
+      const b2X = Math.round((46 + Math.cos(now * 0.006) * 1.2) * p);
+      ctx.fillRect(b2X, b2Y, Math.max(1, Math.round(3 * scale)), Math.max(1, Math.round(3 * scale)));
+
+      // Bubble 3 (larger, highest)
+      const b3Progress = (bubbleProgress + 0.7) % 1.0;
+      const b3Y = Math.round((8 - b3Progress * 6) * p);
+      const b3X = Math.round((48 + Math.sin(now * 0.004) * 1.5) * p);
+      ctx.fillRect(b3X, b3Y, Math.max(1, Math.round(4 * scale)), Math.max(1, Math.round(4 * scale)));
+      ctx.restore();
+
+      // Particles if any
+      if (pose && pose.particles && pose.particles.length > 0) {
+        this.drawParticles(ctx, pose.particles, scale);
+      }
+      return;
+    }
 
     // Layer 1: Unified Seamless Body & Screen Visor
-    const bodyImg = (this.bodyImage && this.bodyImage.complete && this.bodyImage.naturalWidth > 0) ? this.bodyImage : this.headImage;
     ctx.save();
     const tPivotX = (this.PIVOTS.torso.x + rig.torso.dx * COORD_RATIO) * scale;
     const tPivotY = (this.PIVOTS.torso.y + rig.torso.dy * COORD_RATIO) * scale;
@@ -391,7 +556,7 @@ export class PetRenderer {
 
     // Layer 4: Right Hand (Foreground)
     const state = pose?.state;
-    const isRhThink = (state === 'thinking' || state === 'needs_input');
+    const isRhThink = (state === 'needs_input');
     const isRhUp = (state === 'waving' || state === 'ready');
     let rhImg = this.rightHandImage;
     let rhPivot = this.PIVOTS.rightHand;
@@ -498,25 +663,32 @@ export class PetRenderer {
     const expr = rig.expression || 'idle';
 
     if (expr === 'running') {
-      const u = Math.max(1, Math.round(2 * scale));
-      const pw = Math.max(2, Math.round(3 * scale));
-      const t = (typeof performance !== 'undefined' ? performance.now() : Date.now()) * 0.008;
-      for (let i = -2; i <= 2; i++) {
-        const bx = Math.round((128 + i * 11 + rig.lookX * 1.5) * scale) - Math.floor(pw / 2);
-        const wave = (Math.sin(t - i * 0.9) + 1.0) * 0.5; // 0..1
-        const rawH = (4 + Math.round(wave * 10)) * scale;
-        const barH = Math.max(pw, Math.round(rawH / u) * u);
-        const by = Math.round(79 * scale - barH / 2);
+      const p = 4 * scale; // 1 логический пиксель сетки 64x64
+      const shiftX = Math.round(rig.lookX * 0.4) * p;
+      const shiftY = Math.round(rig.lookY * 0.2) * p;
 
-        // Основной цвет полоски — фирменный голубой #00F0FF
-        ctx.fillStyle = '#00F0FF';
-        ctx.fillRect(bx, by, pw, barH);
+      const now = typeof performance !== 'undefined' ? performance.now() : Date.now();
+      const isBlinking = (now % 3600) > 3480;
 
-        // Внутренний светлый блик в центре высоких полосок (#8CFAFF)
-        if (barH >= 8 * scale) {
-          ctx.fillStyle = '#8CFAFF';
-          ctx.fillRect(bx, by + u, pw, barH - 2 * u);
-        }
+      ctx.fillStyle = '#2CE8F5';
+
+      if (isBlinking) {
+        ctx.fillRect(Math.round(23 * p + shiftX), Math.round(22 * p + shiftY), Math.round(6 * p), Math.round(p));
+        ctx.fillRect(Math.round(31 * p + shiftX), Math.round(22 * p + shiftY), Math.round(3 * p), Math.round(p));
+        ctx.fillRect(Math.round(36 * p + shiftX), Math.round(22 * p + shiftY), Math.round(6 * p), Math.round(p));
+      } else {
+        // ЛЕВЫЙ ГЛАЗ (на высоте Y=21..23 — ровно посередине визора!)
+        ctx.fillRect(Math.round(23 * p + shiftX), Math.round(21 * p + shiftY), Math.round(6 * p), Math.round(p));
+        ctx.fillRect(Math.round(24 * p + shiftX), Math.round(22 * p + shiftY), Math.round(4 * p), Math.round(p));
+        ctx.fillRect(Math.round(25 * p + shiftX), Math.round(23 * p + shiftY), Math.round(2 * p), Math.round(p));
+
+        // ЦЕНТРАЛЬНАЯ ЧЕРТОЧКА МЕЖДУ ГЛАЗАМИ (Y=22, ширина 3px)
+        ctx.fillRect(Math.round(31 * p + shiftX), Math.round(22 * p + shiftY), Math.round(3 * p), Math.round(p));
+
+        // ПРАВЫЙ ГЛАЗ (Y=21..23)
+        ctx.fillRect(Math.round(36 * p + shiftX), Math.round(21 * p + shiftY), Math.round(6 * p), Math.round(p));
+        ctx.fillRect(Math.round(37 * p + shiftX), Math.round(22 * p + shiftY), Math.round(4 * p), Math.round(p));
+        ctx.fillRect(Math.round(38 * p + shiftX), Math.round(23 * p + shiftY), Math.round(2 * p), Math.round(p));
       }
     } else if (expr === 'needs_input') {
       // Amber question eyes '? ?' (#FBBF24)
@@ -661,27 +833,27 @@ export class PetRenderer {
     const pw = Math.max(1, Math.round(scale * 3)); // pixel brush width
 
     if (pose.state === 'running') {
-      const u = Math.max(1, Math.round(2 * scale));
-      const pwBar = Math.max(2, Math.round(3 * scale));
-      const t = (typeof performance !== 'undefined' ? performance.now() : Date.now()) * 0.008;
-      const centerX = screenLeft + Math.round(screenW / 2);
-      const centerY = screenTop + Math.round(screenH / 2);
-      for (let i = -2; i <= 2; i++) {
-        const bx = Math.round(centerX + i * 11 * scale) - Math.floor(pwBar / 2);
-        const wave = (Math.sin(t - i * 0.9) + 1.0) * 0.5; // 0..1
-        const rawH = (4 + Math.round(wave * 10)) * scale;
-        const barH = Math.max(pwBar, Math.round(rawH / u) * u);
-        const by = Math.round(centerY - barH / 2);
+      const p = Math.max(1, Math.round(4 * scale));
+      const shiftX = Math.round(offsetX);
+      const shiftY = Math.round(offsetY);
+      const now = typeof performance !== 'undefined' ? performance.now() : Date.now();
+      const isBlinking = (now % 3600) > 3480;
 
-        // Основной цвет полоски — фирменный голубой #00F0FF
-        ctx.fillStyle = '#00F0FF';
-        ctx.fillRect(bx, by, pwBar, barH);
+      ctx.fillStyle = '#2CE8F5';
+      if (isBlinking) {
+        ctx.fillRect(shiftX + 23 * p, shiftY + 22 * p, 6 * p, 1 * p);
+        ctx.fillRect(shiftX + 31 * p, shiftY + 22 * p, 3 * p, 1 * p);
+        ctx.fillRect(shiftX + 36 * p, shiftY + 22 * p, 6 * p, 1 * p);
+      } else {
+        ctx.fillRect(shiftX + 23 * p, shiftY + 21 * p, 6 * p, 1 * p);
+        ctx.fillRect(shiftX + 24 * p, shiftY + 22 * p, 4 * p, 1 * p);
+        ctx.fillRect(shiftX + 25 * p, shiftY + 23 * p, 2 * p, 1 * p);
 
-        // Внутренний светлый блик в центре высоких полосок (#8CFAFF)
-        if (barH >= 8 * scale) {
-          ctx.fillStyle = '#8CFAFF';
-          ctx.fillRect(bx, by + u, pwBar, barH - 2 * u);
-        }
+        ctx.fillRect(shiftX + 31 * p, shiftY + 22 * p, 3 * p, 1 * p);
+
+        ctx.fillRect(shiftX + 36 * p, shiftY + 21 * p, 6 * p, 1 * p);
+        ctx.fillRect(shiftX + 37 * p, shiftY + 22 * p, 4 * p, 1 * p);
+        ctx.fillRect(shiftX + 38 * p, shiftY + 23 * p, 2 * p, 1 * p);
       }
     } else if (pose.state === 'needs_input') {
       // Amber question eyes '? ?' (#FBBF24)

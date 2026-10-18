@@ -226,7 +226,7 @@ export class AgentStateMachine extends EventEmitter {
   private readonly maxHistorySize: number;
   private readyAutoReturnTimer: NodeJS.Timeout | null = null;
   private readyDebounceTimer: NodeJS.Timeout | null = null;
-  private workingToThinkingTimer: NodeJS.Timeout | null = null;
+  private thinkingSafetyTimer: NodeJS.Timeout | null = null;
   private hasCelebratedTurn: boolean = false;
   private sessions: Map<string, SessionContext> = new Map();
 
@@ -360,10 +360,6 @@ export class AgentStateMachine extends EventEmitter {
     // Protection against premature ready during rapid sub-turns / /btw:
     // If a turn_complete arrives within 1.5s of an active tool call, debounce ready
     if (targetState === 'ready' && session.lastToolCallTime && (now - session.lastToolCallTime < 1500)) {
-      if (this.workingToThinkingTimer) {
-        clearTimeout(this.workingToThinkingTimer);
-        this.workingToThinkingTimer = null;
-      }
       const remainingDelay = 1500 - (now - session.lastToolCallTime);
       if (this.readyDebounceTimer) {
         clearTimeout(this.readyDebounceTimer);
@@ -406,9 +402,9 @@ export class AgentStateMachine extends EventEmitter {
       this.readyAutoReturnTimer = null;
     }
 
-    if (this.workingToThinkingTimer) {
-      clearTimeout(this.workingToThinkingTimer);
-      this.workingToThinkingTimer = null;
+    if (this.thinkingSafetyTimer) {
+      clearTimeout(this.thinkingSafetyTimer);
+      this.thinkingSafetyTimer = null;
     }
 
     if (nextState === 'running') {
@@ -417,35 +413,29 @@ export class AgentStateMachine extends EventEmitter {
         clearTimeout(this.readyDebounceTimer);
         this.readyDebounceTimer = null;
       }
-
-      // Schedule transition from Working (1.2s) / tool execution (1.8s) to Thinking
-      const isUserInput =
-        metadata?.type === 'USER_INPUT' ||
-        metadata?.role === 'user' ||
-        summary?.includes('Processing request') ||
-        summary?.includes('В работе...');
-      const delay = isUserInput ? 1200 : 1800;
-
-      this.workingToThinkingTimer = setTimeout(() => {
-        this.workingToThinkingTimer = null;
-        if (this.currentState === 'running') {
-          for (const sess of this.sessions.values()) {
-            if (sess.state === 'running') {
-              sess.state = 'thinking';
-              sess.summary = 'Думаю...';
-              sess.lastUpdated = Date.now();
-            }
-          }
-          this.transitionTo('thinking', 'Думаю...', { autoThinking: true, thinking: true });
-        }
-      }, delay);
-      if (typeof this.workingToThinkingTimer?.unref === 'function') {
-        this.workingToThinkingTimer.unref();
-      }
     }
 
     if (nextState === 'thinking') {
       this.hasCelebratedTurn = false;
+    }
+
+    if (nextState === 'thinking' || nextState === 'running') {
+      this.thinkingSafetyTimer = setTimeout(() => {
+        this.thinkingSafetyTimer = null;
+        if (this.currentState === 'thinking' || this.currentState === 'running') {
+          for (const sess of this.sessions.values()) {
+            if (sess.state === 'thinking' || sess.state === 'running') {
+              sess.state = 'idle';
+              sess.summary = 'В ожидании';
+              sess.lastUpdated = Date.now();
+            }
+          }
+          this.transitionTo('idle', 'В ожидании');
+        }
+      }, 12000);
+      if (typeof this.thinkingSafetyTimer?.unref === 'function') {
+        this.thinkingSafetyTimer.unref();
+      }
     }
 
     if (nextState === 'ready') {
@@ -510,9 +500,9 @@ export class AgentStateMachine extends EventEmitter {
       clearTimeout(this.readyDebounceTimer);
       this.readyDebounceTimer = null;
     }
-    if (this.workingToThinkingTimer) {
-      clearTimeout(this.workingToThinkingTimer);
-      this.workingToThinkingTimer = null;
+    if (this.thinkingSafetyTimer) {
+      clearTimeout(this.thinkingSafetyTimer);
+      this.thinkingSafetyTimer = null;
     }
     this.hasCelebratedTurn = false;
     this.sessions.clear();

@@ -259,6 +259,8 @@ export class OverlayApplication {
   private dragStartWindowPos: [number, number] | null = null;
   private lastActiveAgPid: number | null = null;
   private lastActiveAgHwnd: string | null = null;
+  private llmThinkingTimer: NodeJS.Timeout | null = null;
+  private thinkingAutoIdleTimer: NodeJS.Timeout | null = null;
 
   private enforceTopmost = (): void => {
     if (this.isPetHidden || this.isSendingChatMessage) return;
@@ -270,6 +272,9 @@ export class OverlayApplication {
       }
       if (typeof this.mainWindow.moveTop === 'function') {
         this.mainWindow.moveTop();
+      }
+      if (typeof this.mainWindow.setSkipTaskbar === 'function') {
+        this.mainWindow.setSkipTaskbar(true);
       }
     }
   };
@@ -363,6 +368,95 @@ export class OverlayApplication {
 
     this.lastForwardedKey = key;
     this.lastForwardedTime = now;
+
+    // Smart timer choreography for server-side LLM thinking pause
+    if (payload.state === 'running') {
+      if (this.thinkingAutoIdleTimer) {
+        clearTimeout(this.thinkingAutoIdleTimer);
+        this.thinkingAutoIdleTimer = null;
+      }
+      if (this.llmThinkingTimer) {
+        clearTimeout(this.llmThinkingTimer);
+        this.llmThinkingTimer = null;
+      }
+
+      // Immediately send running state (Gravi sits at laptop)
+      this.mainWindow.webContents.send('state_update', payload);
+
+      // Start 1500ms timer waiting for server-side LLM thinking pause
+      this.llmThinkingTimer = setTimeout(() => {
+        this.llmThinkingTimer = null;
+        if (!this.mainWindow || this.mainWindow.isDestroyed()) return;
+
+        const thinkPayload: StatePayload = {
+          state: 'thinking',
+          summary: 'Думаю 1с...',
+          timestamp: Date.now(),
+          metadata: { thinking: true },
+        };
+        this.lastForwardedKey = 'thinking:::Думаю 1с...';
+        this.lastForwardedTime = Date.now();
+        this.mainWindow.webContents.send('state_update', thinkPayload);
+
+        // Start 12-second safety timer returning to idle if no lines arrive
+        if (this.thinkingAutoIdleTimer) {
+          clearTimeout(this.thinkingAutoIdleTimer);
+        }
+        this.thinkingAutoIdleTimer = setTimeout(() => {
+          this.thinkingAutoIdleTimer = null;
+          if (!this.mainWindow || this.mainWindow.isDestroyed()) return;
+          const idlePayload: StatePayload = {
+            state: 'idle',
+            summary: 'В ожидании',
+            timestamp: Date.now(),
+          };
+          this.lastForwardedKey = 'idle:::В ожидании';
+          this.lastForwardedTime = Date.now();
+          this.mainWindow.webContents.send('state_update', idlePayload);
+        }, 12000);
+        if (typeof this.thinkingAutoIdleTimer.unref === 'function') {
+          this.thinkingAutoIdleTimer.unref();
+        }
+      }, 1500);
+
+      if (typeof this.llmThinkingTimer.unref === 'function') {
+        this.llmThinkingTimer.unref();
+      }
+      return;
+    }
+
+    // For any non-running state (tool call finished, prompt user, ready celebration, error)
+    if (this.llmThinkingTimer) {
+      clearTimeout(this.llmThinkingTimer);
+      this.llmThinkingTimer = null;
+    }
+
+    if (payload.state === 'thinking') {
+      if (this.thinkingAutoIdleTimer) {
+        clearTimeout(this.thinkingAutoIdleTimer);
+      }
+      this.thinkingAutoIdleTimer = setTimeout(() => {
+        this.thinkingAutoIdleTimer = null;
+        if (!this.mainWindow || this.mainWindow.isDestroyed()) return;
+        const idlePayload: StatePayload = {
+          state: 'idle',
+          summary: 'В ожидании',
+          timestamp: Date.now(),
+        };
+        this.lastForwardedKey = 'idle:::В ожидании';
+        this.lastForwardedTime = Date.now();
+        this.mainWindow.webContents.send('state_update', idlePayload);
+      }, 12000);
+      if (typeof this.thinkingAutoIdleTimer.unref === 'function') {
+        this.thinkingAutoIdleTimer.unref();
+      }
+    } else {
+      if (this.thinkingAutoIdleTimer) {
+        clearTimeout(this.thinkingAutoIdleTimer);
+        this.thinkingAutoIdleTimer = null;
+      }
+    }
+
     this.mainWindow.webContents.send('state_update', payload);
   }
 
@@ -461,6 +555,7 @@ export class OverlayApplication {
 
     this.mainWindow = new BrowserWindow({
       ...WINDOW_SPEC,
+      skipTaskbar: true,
       width,
       height,
       x: Math.round(posX),
@@ -471,6 +566,12 @@ export class OverlayApplication {
         backgroundThrottling: false,
       },
     });
+
+    if (typeof this.mainWindow.setSkipTaskbar === 'function') {
+      try {
+        this.mainWindow.setSkipTaskbar(true);
+      } catch (_e) {}
+    }
 
     if (typeof this.mainWindow.setIgnoreMouseEvents === 'function') {
       try {
@@ -504,6 +605,11 @@ export class OverlayApplication {
       logDebug('mainWindow did-finish-load: ensuring visible and focused');
       if (this.mainWindow && !this.mainWindow.isDestroyed()) {
         this.mainWindow.show();
+        if (typeof this.mainWindow.setSkipTaskbar === 'function') {
+          try {
+            this.mainWindow.setSkipTaskbar(true);
+          } catch (_e) {}
+        }
         this.enforceTopmost();
       }
     });
@@ -668,6 +774,16 @@ export class OverlayApplication {
 
     ipcMain.on('ag-pet:prepare-compose', () => {
       this.captureForegroundWindow();
+      if (this.mainWindow && !this.mainWindow.isDestroyed()) {
+        try {
+          if (typeof this.mainWindow.setIgnoreMouseEvents === 'function') {
+            this.mainWindow.setIgnoreMouseEvents(false);
+          }
+          if (typeof this.mainWindow.focus === 'function') {
+            this.mainWindow.focus();
+          }
+        } catch (_e) {}
+      }
     });
 
     ipcMain.on('ag-pet:send-chat-message', (_event: any, text: string) => {
@@ -716,10 +832,8 @@ $p = 0
     this.isSendingChatMessage = true;
 
     const clipboard = electronModule?.clipboard;
-    let originalClipboard = '';
     try {
       if (clipboard) {
-        originalClipboard = clipboard.readText();
         clipboard.writeText(text);
       }
     } catch (err: any) {
@@ -728,19 +842,14 @@ $p = 0
 
     if (this.mainWindow && !this.mainWindow.isDestroyed()) {
       try {
-        if (typeof this.mainWindow.setIgnoreMouseEvents === 'function') {
-          this.mainWindow.setIgnoreMouseEvents(true, { forward: true });
-        }
-        if (typeof this.mainWindow.blur === 'function') {
-          this.mainWindow.blur();
-        }
+        this.mainWindow.hide();
       } catch (_e) {}
     }
 
-    const scriptPath = path.resolve(__dirname, '..', '..', 'scripts', 'send-chat-message.ps1');
+    const scriptPath = 'd:\\Projects\\AG_Pet\\scripts\\send-to-chat.ps1';
     const targetHwnd = this.lastActiveAgHwnd || '0';
     const targetPid = this.lastActiveAgPid || this.parentPid || 0;
-    logDebug(`Executing send-chat-message.ps1 with targetHwnd=${targetHwnd}, targetPid=${targetPid}`);
+    logDebug(`Executing send-to-chat.ps1 with targetHwnd=${targetHwnd}, targetPid=${targetPid}, scriptPath=${scriptPath}`);
 
     if (process.platform === 'win32') {
       child_process.execFile(
@@ -752,36 +861,31 @@ $p = 0
           'Bypass',
           '-File',
           scriptPath,
-          '-TargetHwnd',
-          String(targetHwnd),
           '-TargetPid',
           String(targetPid),
+          '-TargetHwnd',
+          String(targetHwnd),
         ],
-        { windowsHide: true },
+        { windowsHide: true, timeout: 5000 },
         (err, stdout, stderr) => {
           if (err) {
-            logDebug(`send-chat-message.ps1 error: ${err.message}, stderr: ${stderr}`);
+            logDebug(`send-to-chat.ps1 error: ${err.message}, stderr: ${stderr}`);
           } else {
-            logDebug(`send-chat-message.ps1 result: ${stdout ? stdout.trim() : ''}`);
+            logDebug(`send-to-chat.ps1 result: ${stdout ? stdout.trim() : ''}`);
           }
 
-          // Restore user's previous clipboard after pasting
-          setTimeout(() => {
-            try {
-              if (clipboard && originalClipboard !== undefined) {
-                clipboard.writeText(originalClipboard);
-                logDebug('Restored user clipboard');
-              }
-            } catch (_e) {}
-          }, 500);
-
-          // Reset sending flag and re-enforce topmost after 1200ms
           setTimeout(() => {
             this.isSendingChatMessage = false;
-            if (!this.isPetHidden) {
-              this.enforceTopmost();
+            if (this.mainWindow && !this.mainWindow.isDestroyed() && !this.isPetHidden) {
+              try {
+                this.mainWindow.showInactive();
+                if (typeof this.mainWindow.setSkipTaskbar === 'function') {
+                  this.mainWindow.setSkipTaskbar(true);
+                }
+                this.enforceTopmost();
+              } catch (_e) {}
             }
-          }, 1200);
+          }, 450);
         }
       );
     } else {
@@ -802,6 +906,11 @@ $p = 0
     this.isPetHidden = false;
     if (this.mainWindow && !this.mainWindow.isDestroyed()) {
       this.mainWindow.show();
+      if (typeof this.mainWindow.setSkipTaskbar === 'function') {
+        try {
+          this.mainWindow.setSkipTaskbar(true);
+        } catch (_e) {}
+      }
       this.enforceTopmost();
       if (typeof this.mainWindow.setIgnoreMouseEvents === 'function') {
         try {
@@ -1012,6 +1121,14 @@ $p = 0
 
   public terminate(): void {
     logDebug('OverlayApplication.terminate() called!');
+    if (this.llmThinkingTimer) {
+      clearTimeout(this.llmThinkingTimer);
+      this.llmThinkingTimer = null;
+    }
+    if (this.thinkingAutoIdleTimer) {
+      clearTimeout(this.thinkingAutoIdleTimer);
+      this.thinkingAutoIdleTimer = null;
+    }
     if (globalShortcut && typeof globalShortcut.unregisterAll === 'function') {
       try {
         globalShortcut.unregisterAll();
