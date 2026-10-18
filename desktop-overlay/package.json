@@ -1,18 +1,56 @@
 {
   "name": "desktop-overlay",
+  "productName": "AG-Pet",
   "version": "1.0.0",
   "description": "AG Pet - Desktop Pet Overlay Electron Application",
   "main": "dist/desktop-overlay/main/index.js",
+  "author": "lennielan",
+  "license": "MIT",
   "scripts": {
-    "build": "tsc && node -e \"const fs=require('fs'); fs.copyFileSync('renderer/index.html', 'dist/desktop-overlay/renderer/index.html'); fs.copyFileSync('renderer/style.css', 'dist/desktop-overlay/renderer/style.css'); if (fs.existsSync('renderer/assets')) fs.cpSync('renderer/assets', 'dist/desktop-overlay/renderer/assets', {recursive: true});\"",
+    "build": "node ../scripts/sync-assets.js && tsc && node -e \"const fs=require('fs'); fs.copyFileSync('renderer/index.html', 'dist/desktop-overlay/renderer/index.html'); fs.copyFileSync('renderer/style.css', 'dist/desktop-overlay/renderer/style.css'); if (fs.existsSync('renderer/assets')) fs.cpSync('renderer/assets', 'dist/desktop-overlay/renderer/assets', {recursive: true});\" && node ../scripts/sync-assets.js",
     "typecheck": "tsc --noEmit",
-    "start": "electron ."
+    "start": "electron .",
+    "dist": "npm run build && electron-builder --win"
   },
-  "dependencies": {
-    "electron": "^29.3.1"
+  "build": {
+    "appId": "com.lennielan.agpet",
+    "productName": "AG-Pet",
+    "directories": {
+      "output": "release"
+    },
+    "files": [
+      "dist/**/*",
+      "package.json"
+    ],
+    "win": {
+      "target": [
+        {
+          "target": "nsis",
+          "arch": [
+            "x64"
+          ]
+        },
+        {
+          "target": "portable",
+          "arch": [
+            "x64"
+          ]
+        }
+      ],
+      "icon": "build/icon.ico"
+    },
+    "nsis": {
+      "oneClick": false,
+      "allowToChangeInstallationDirectory": true,
+      "createDesktopShortcut": true,
+      "createStartMenuShortcut": true,
+      "shortcutName": "AG Pet (Gravi)"
+    }
   },
   "devDependencies": {
     "@types/node": "^20.12.7",
+    "electron": "^29.3.1",
+    "electron-builder": "^26.15.3",
     "typescript": "^5.4.5"
   }
 }

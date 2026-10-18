@@ -6,7 +6,8 @@
   "types": "sprite-engine/index.ts",
   "scripts": {
     "typecheck": "tsc --noEmit",
-    "build": "tsc && npm run build --prefix desktop-overlay && npm run build --prefix extension",
+    "build": "node scripts/sync-assets.js && tsc && npm run build --prefix desktop-overlay && npm run build --prefix extension && node scripts/sync-assets.js",
+    "dist": "npm run build && npm run dist --prefix desktop-overlay",
     "test": "node tests/runner.js"
   },
   "devDependencies": {

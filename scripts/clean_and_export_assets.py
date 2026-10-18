@@ -250,7 +250,28 @@ canvas128 = crop_to_128(trans_img)
 canvas512 = crop_to_512(trans_img)
 
 # 4 Skeletal Part Canvases (256x256)
-head256 = crop_to_256(head_img)
+# User custom body preservation: NEVER overwrite user-edited Gravi body!
+user_custom_sources = [
+    'd:/Projects/AG_Pet/assets/master/gravi_body_256.png',
+    os.path.join(renderer_assets_dir, 'gravi_body_256.png'),
+    os.path.join(out_clean_dir, 'gravi_body_256.png'),
+]
+user_body_img = None
+for u_path in user_custom_sources:
+    if os.path.exists(u_path):
+        try:
+            cand = Image.open(u_path).convert('RGBA')
+            if cand.size == (256, 256):
+                user_body_img = cand
+                print(f"[ASSET LOCK] Loaded user-customized Gravi body from: {u_path}")
+                break
+        except Exception as e:
+            print(f"[ASSET LOCK] Note: could not load {u_path}: {e}")
+
+if user_body_img is not None:
+    head256 = user_body_img.copy()
+else:
+    head256 = crop_to_256(head_img)
 torso256 = crop_to_256(torso_img)
 lh256 = crop_to_256(lh_img)
 rh256 = crop_to_256(rh_img)
@@ -296,9 +317,14 @@ for dest_dir in [out_clean_dir, renderer_assets_dir, dist_assets_dir]:
     canvas128.save(os.path.join(dest_dir, 'gravi_cropped_128.png'), 'PNG')
     canvas512.save(os.path.join(dest_dir, 'gravi_cropped_512.png'), 'PNG')
     
-    # Skeletal Part Assets
-    head256.save(os.path.join(dest_dir, 'gravi_body_256.png'), 'PNG')
-    head256.save(os.path.join(dest_dir, 'gravi_head_256.png'), 'PNG')
+    # Skeletal Part Assets (Protected user custom body)
+    master_body = 'd:/Projects/AG_Pet/assets/master/gravi_body_256.png'
+    if os.path.exists(master_body):
+        shutil.copy2(master_body, os.path.join(dest_dir, 'gravi_body_256.png'))
+        shutil.copy2(master_body, os.path.join(dest_dir, 'gravi_head_256.png'))
+    else:
+        head256.save(os.path.join(dest_dir, 'gravi_body_256.png'), 'PNG')
+        head256.save(os.path.join(dest_dir, 'gravi_head_256.png'), 'PNG')
     torso256.save(os.path.join(dest_dir, 'gravi_torso_256.png'), 'PNG')
     lh256.save(os.path.join(dest_dir, 'gravi_left_hand_256.png'), 'PNG')
     rh256.save(os.path.join(dest_dir, 'gravi_right_hand_256.png'), 'PNG')
@@ -306,9 +332,11 @@ for dest_dir in [out_clean_dir, renderer_assets_dir, dist_assets_dir]:
     rh_up_256.save(os.path.join(dest_dir, 'gravi_right_hand_up_256.png'), 'PNG')
     lh_up_256.save(os.path.join(dest_dir, 'gravi_left_hand_up_256.png'), 'PNG')
 
+if os.path.exists(master_body):
+    shutil.copy2(master_body, os.path.join(artifact_dir, 'gravi_body_256.png'))
+    shutil.copy2(master_body, os.path.join(artifact_dir, 'gravi_head_256.png'))
+
 for name, img_part in [
-    ('gravi_body_256.png', head256),
-    ('gravi_head_256.png', head256),
     ('gravi_torso_256.png', torso256),
     ('gravi_left_hand_256.png', lh256),
     ('gravi_right_hand_256.png', rh256),

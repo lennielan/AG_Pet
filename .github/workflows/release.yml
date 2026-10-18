@@ -1,0 +1,48 @@
+name: Release AG-Pet
+
+on:
+  push:
+    tags:
+      - 'v*'
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  build-and-release:
+    runs-on: windows-latest
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: 'npm'
+
+      - name: Install root dependencies
+        run: npm ci
+
+      - name: Install desktop-overlay dependencies
+        run: cd desktop-overlay && npm ci
+
+      - name: Install extension dependencies
+        run: cd extension && npm ci
+
+      - name: Build project
+        run: npm run build
+
+      - name: Package Windows Executables
+        run: npm run dist --prefix desktop-overlay
+
+      - name: Publish GitHub Release
+        uses: softprops/action-gh-release@v2
+        if: startsWith(github.ref, 'refs/tags/')
+        with:
+          files: |
+            desktop-overlay/release/*.exe
+            desktop-overlay/release/*.blockmap
+          generate_release_notes: true

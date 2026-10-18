@@ -8,6 +8,7 @@ out/
 build/
 *.vsix
 desktop-overlay/dist/
+desktop-overlay/release/
 extension/dist/
 
 # Logs and runtime artifacts
